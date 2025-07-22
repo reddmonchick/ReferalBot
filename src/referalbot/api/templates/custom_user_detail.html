@@ -1,0 +1,16 @@
+{% extends "sqladmin/detail.html" %}
+{% block content %}
+    <h1>Пользователь: {{ model.username }}</h1>
+    <table class="table">
+        <tr><th>ID</th><td>{{ model.id }}</td></tr>
+        <tr><th>Telegram ID</th><td>{{ model.telegram_id }}</td></tr>
+        <tr><th>Username</th><td>{{ model.username }}</td></tr>
+        <tr><th>Promo Code</th><td>{{ model.promo_code }}</td></tr>
+        <tr><th>Пригласивший</th><td>{{ model.invited_by.username if model.invited_by else '-' }}</td></tr>
+        <tr><th>Рефералы</th><td>{{ ", ".join([ref.username or "User " + ref.id|string for ref in model.referrals]) if model.referrals else "-" }}</td></tr>
+        <tr><th>Покупки</th><td>{{ ", ".join([p.name for p in model.purchases]) if model.purchases else "-" }}</td></tr>
+        <tr><th>Общий бонус</th><td>{{ model.total_bonus }}</td></tr>
+        <tr><th>Выплаченный бонус</th><td>{{ model.paid_bonus }}</td></tr>
+    </table>
+    <a href="/admin/user/list" class="btn btn-secondary">Назад</a>
+{% endblock %}
