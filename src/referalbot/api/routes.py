@@ -1,12 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, func
-from src.referalbot.database.models import User, Purchase
-from src.referalbot.database.db import async_session
+from referalbot.database.models import User, Purchase, BonusHistory
+from referalbot.database.db import async_session
 from pydantic import BaseModel
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from aiogram import Bot
+from referalbot.config import TELEGRAM_TOKEN
 
 router = APIRouter()
+bot = Bot(token=TELEGRAM_TOKEN) # Создаем экземпляр бота для отправки сообщений
 
 class PurchaseCreate(BaseModel):
     user_id: int
@@ -15,6 +18,16 @@ class PurchaseCreate(BaseModel):
 
 class PurchaseUpdate(BaseModel):
     bonus_paid: bool
+
+async def log_bonus_history(session, user_id, amount, operation, description):
+    history = BonusHistory(
+        user_id=user_id,
+        amount=amount,
+        operation=operation,
+        description=description
+    )
+    session.add(history)
+    await session.flush() # Используем flush для немедленной записи без коммита
 
 def log_to_google_sheet(purchase, user):
     try:
@@ -41,7 +54,8 @@ def log_to_google_sheet(purchase, user):
             purchase.amount,
             purchase.discount_applied,
             purchase.bonus_amount,
-            "Paid" if purchase.bonus_paid else "Pending",
+            # Статус "Ожидание" заменен на "Начислен"
+            "Выплачен" if purchase.bonus_paid else "Начислен", 
         ]
         
         if purchase_row:
@@ -94,22 +108,55 @@ async def list_users():
 @router.post("/purchases")
 async def create_purchase(purchase: PurchaseCreate):
     async with async_session() as session:
-        user = await session.execute(select(User).filter_by(id=purchase.user_id))
-        user = user.scalar_one_or_none()
+        user_result = await session.execute(select(User).filter_by(id=purchase.user_id))
+        user = user_result.scalar_one_or_none()
         if not user:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        calculated_bonus_amount = 0
+        if user.invited_by_id:
+            calculated_bonus_amount = int(round(purchase.amount * 0.05))
+
         new_purchase = Purchase(
             user_id=purchase.user_id,
             amount=purchase.amount,
-            discount_applied=purchase.discount_applied if user.invited_by_id else 0,
-            bonus_amount=purchase.amount*0.05
+            discount_applied=purchase.discount_applied,
+            bonus_amount=calculated_bonus_amount
         )
+
         session.add(new_purchase)
         await session.commit()
         await session.refresh(new_purchase)
-        log_to_google_sheet(new_purchase, user)
-        return {"message": "Покупка создана"}
 
+        #log_to_google_sheet(new_purchase, user)
+
+        if user.invited_by_id and calculated_bonus_amount > 0:
+            # Логируем начисление бонуса
+            await log_bonus_history(
+                session,
+                user.invited_by_id,
+                calculated_bonus_amount,
+                "Начисление",
+                f"За покупку от {user.username} (ID: {new_purchase.id})"
+            )
+
+            # >> НОВОЕ: Отправляем уведомление о начислении бонуса <<
+            inviter_result = await session.execute(select(User).filter_by(id=user.invited_by_id))
+            inviter = inviter_result.scalar_one_or_none()
+            if inviter and inviter.telegram_id:
+                try:
+                    await bot.send_message(
+                        chat_id=inviter.telegram_id,
+                        text=f"🎉 Вам начислен бонус: +{calculated_bonus_amount:,} IDR за покупку вашего реферала {user.username}."
+                    )
+                except Exception as e:
+                    print(f"Не удалось отправить уведомление пользователю {inviter.telegram_id}: {e}")
+            
+            await session.commit()
+
+
+        return {"message": "Покупка создана", "purchase_id": new_purchase.id, "bonus_amount": new_purchase.bonus_amount}
+    
 @router.patch("/purchases/{purchase_id}")
 async def update_purchase(purchase_id: int, update: PurchaseUpdate):
     async with async_session() as session:
@@ -117,12 +164,23 @@ async def update_purchase(purchase_id: int, update: PurchaseUpdate):
         purchase = purchase.scalar_one_or_none()
         if not purchase:
             raise HTTPException(status_code=404, detail="Покупка не найдена")
+
+        # Если бонус помечается как выплаченный
+        if update.bonus_paid and not purchase.bonus_paid:
+            # Логируем выплату у пригласившего (если есть)
+            if purchase.user.invited_by_id:
+                await log_bonus_history(
+                    session,
+                    purchase.user.invited_by_id,
+                    -purchase.bonus_amount,
+                    "Выплата",
+                    f"Выплата по покупке ID: {purchase_id}"
+                )
+
         purchase.bonus_paid = update.bonus_paid
         await session.commit()
         await session.refresh(purchase)
         user = await session.execute(select(User).filter_by(id=purchase.user_id))
         user = user.scalar_one_or_none()
-        log_to_google_sheet(purchase, user)
+        #log_to_google_sheet(purchase, user)
         return {"message": "Покупка обновлена"}
-    
-

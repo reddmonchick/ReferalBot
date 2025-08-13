@@ -1,12 +1,22 @@
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import Command, CommandStart
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from referalbot.database.models import User, Purchase
+from sqlalchemy import func, and_
+from datetime import datetime, timedelta
+from sqlalchemy import func # Импортируем func для использования SUM
+from sqlalchemy.orm import selectinload
+from referalbot.database.models import User, Purchase, BonusHistory
 from referalbot.bot.utils import generate_promo_code
+# Импортируем функцию логирования и модель Purchase
+from referalbot.api.routes import log_bonus_history
 from referalbot.utils import logger
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram import Bot
+from referalbot.config import TELEGRAM_TOKEN
 
 router = Router()
+bot = Bot(token=TELEGRAM_TOKEN)
 
 @router.message(CommandStart(deep_link=True))
 async def start_with_referral(message: types.Message, command, session: AsyncSession):
@@ -20,10 +30,14 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
             await message.answer("Некорректный реферальный код.")
             return
 
+        # Упрощенная проверка реферала
+        ref_code_clean = ref_code.replace("REF_", "")
+        
+        # Используем одну транзакцию для всей операции
         async with session.begin():
-            result = await session.execute(select(User).filter_by(telegram_id=telegram_id))
-            user = result.scalar_one_or_none()
-
+            # Ищем текущего пользователя
+            user = await session.scalar(select(User).filter_by(telegram_id=telegram_id))
+            
             if not user:
                 promo_code = generate_promo_code(username)
                 user = User(
@@ -33,15 +47,15 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
                 )
                 session.add(user)
                 await session.flush()  # Сохраняем, чтобы получить ID
-
-            ref_code_check = ref_code.replace("REF_", "")
-            result = await session.execute(select(User).filter_by(promo_code=ref_code_check))
-            inviter = result.scalar_one_or_none()
+            
+            # Ищем пригласившего пользователя
+            inviter = await session.scalar(select(User).filter_by(promo_code=ref_code_clean))
+            
             if inviter and inviter.telegram_id != telegram_id:
                 user.invited_by_id = inviter.id
                 await message.answer(
                     f"Добро пожаловать, {username}!\n"
-                    f"Вы получили 5% скидку по коду {ref_code}!\n"
+                    f"Вы получили 5% скидку по коду {ref_code} на все услуги Bali Love Consulting!!\n"
                     f"Ваш промокод: {user.promo_code}\n"
                     f"Приглашайте друзей: t.me/bali_referal_bot?start=REF_{user.promo_code}"
                 )
@@ -52,6 +66,7 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
                     f"Приглашайте друзей: t.me/bali_referal_bot?start=REF_{user.promo_code}\n"
                     f"Реферальный код {ref_code} недействителен."
                 )
+                
     except Exception as e:
         logger.error(f"Ошибка в /start с реферальным кодом: {e}")
         await message.answer("Ошибка при обработке реферальной ссылки.")
@@ -62,9 +77,10 @@ async def start(message: types.Message, session: AsyncSession):
     try:
         telegram_id = message.from_user.id
         username = message.from_user.username or "Неизвестный"
+        
         async with session.begin():
-            result = await session.execute(select(User).filter_by(telegram_id=telegram_id))
-            user = result.scalar_one_or_none()
+            user = await session.scalar(select(User).filter_by(telegram_id=telegram_id))
+            
             if not user:
                 promo_code = generate_promo_code(username)
                 user = User(
@@ -73,6 +89,7 @@ async def start(message: types.Message, session: AsyncSession):
                     promo_code=promo_code
                 )
                 session.add(user)
+                
         await message.answer(
             f"Добро пожаловать, {username}!\n"
             f"Ваш промокод: {user.promo_code}\n"
@@ -110,6 +127,7 @@ async def help_command(message: types.Message):
             "/start - Зарегистрироваться и получить промокод\n"
             "/promo - Показать промокод\n"
             "/bonuses - Проверить бонусы\n"
+            "/history - История операций\n" 
             "/invite - Получить реферальную ссылку\n"
             "/help - Показать это сообщение"
         )
@@ -119,42 +137,107 @@ async def help_command(message: types.Message):
 
 @router.message(Command("bonuses"))
 async def check_bonuses(message: types.Message, session: AsyncSession):
+    """
+    Обработчик команды /bonuses.
+    Показывает общий баланс, бонусы за последнюю неделю и за всё время.
+    """
     logger.info(f"Обработка /bonuses для пользователя {message.from_user.id}")
     try:
         telegram_id = message.from_user.id
         async with session.begin():
-            result = await session.execute(select(User).filter_by(telegram_id=telegram_id))
-            user = result.scalar_one_or_none()
+            # Находим ID пользователя в нашей системе
+            user_id = await session.scalar(select(User.id).filter_by(telegram_id=telegram_id))
+            if not user_id:
+                await message.answer("Сначала используйте /start.")
+                return
+
+            # --- 1. Общий баланс (как и раньше) ---
+            total_bonus_result = await session.execute(
+                select(func.sum(BonusHistory.amount)).filter_by(user_id=user_id)
+            )
+            total_balance = total_bonus_result.scalar_one_or_none() or 0
+
+            # --- 2. Бонусы за последнюю неделю ---
+            # Вычисляем дату начала последней недели
+            one_week_ago = datetime.utcnow() - timedelta(days=7)
+            
+            # Запрашиваем сумму бонусов за последнюю неделю
+            weekly_bonus_result = await session.execute(
+                select(func.sum(BonusHistory.amount))
+                .filter(
+                    and_(
+                        BonusHistory.user_id == user_id,
+                        BonusHistory.amount > 0, # Только начисления
+                        BonusHistory.date >= one_week_ago
+                    )
+                )
+            )
+            weekly_earnings = weekly_bonus_result.scalar_one_or_none() or 0
+
+            # --- 3. Общие начисленные бонусы за всё время ---
+            # Запрашиваем сумму всех начисленных бонусов (amount > 0)
+            total_earned_result = await session.execute(
+                select(func.sum(BonusHistory.amount))
+                .filter(
+                    and_(
+                        BonusHistory.user_id == user_id,
+                        BonusHistory.amount > 0 # Только начисления
+                    )
+                )
+            )
+            total_earned = total_earned_result.scalar_one_or_none() or 0
+
+            # --- Формирование ответа ---
+            await message.answer(
+                f"💳 *Ваш бонусный баланс:*\n"
+                f"**{total_balance:,} IDR**\n\n"
+                f"📊 *Статистика начислений:*\n"
+                f"За последнюю неделю: **+{weekly_earnings:,} IDR**\n"
+                f"За всё время: **+{total_earned:,} IDR**\n\n"
+                f"_Для выплаты бонусов свяжитесь с администратором._",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        logger.error(f"Ошибка в /bonuses: {e}")
+        await message.answer("Произошла ошибка при проверке бонусов.")
+
+@router.message(Command("history"))
+async def bonus_history(message: types.Message, session: AsyncSession):
+    """
+    Этот обработчик уже был почти правильным, немного улучшим форматирование.
+    """
+    logger.info(f"Обработка /history для пользователя {message.from_user.id}")
+    try:
+        telegram_id = message.from_user.id
+        async with session.begin():
+            user = await session.scalar(select(User).filter_by(telegram_id=telegram_id))
             if not user:
                 await message.answer("Сначала используйте /start.")
                 return
 
-            referrals = await session.execute(select(User).filter_by(invited_by_id=user.id))
-            referrals = referrals.scalars().all()
-            total_bonus = 0
-            paid_bonus = 0
-            total_purchases = 0
-            for referral in referrals:
-                purchases = await session.execute(select(Purchase).filter_by(user_id=referral.id))
-                purchases = purchases.scalars().all()
-                for purchase in purchases:
-                    total_purchases += purchase.amount
-                    bonus = purchase.bonus_amount
-                    if purchase.bonus_paid:
-                        paid_bonus += bonus
-                    else:
-                        total_bonus += bonus
+            history_result = await session.execute(
+                select(BonusHistory)
+                .filter_by(user_id=user.id)
+                .order_by(BonusHistory.date.desc())
+                .limit(15)
+            )
+            history = history_result.scalars().all()
 
-        await message.answer(
-            f"Вы пригласили: {len(referrals)} чел.\n"
-            f"Общая сумма покупок: {total_purchases:,} IDR\n"
-            f"Ваш бонус: {total_bonus + paid_bonus:,} IDR\n"
-            f"Выплачено: {paid_bonus:,} IDR\n"
-            f"Ожидает: {total_bonus:,} IDR"
-        )
+            if not history:
+                await message.answer("История операций с бонусами пуста.")
+                return
+
+            response = "📜 **Последние 15 операций:**\n\n"
+            for entry in history:
+                amount_formatted = f"{entry.amount:,}".replace(",", " ")
+                sign = "+" if entry.amount > 0 else ""
+                response += f"`{entry.date.strftime('%d.%m.%Y')}`: **{sign}{amount_formatted} IDR**\n"
+                response += f"_{entry.operation} ({entry.description})_\n\n"
+
+            await message.answer(response, parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"Ошибка в /bonuses: {e}")
-        await message.answer("Ошибка при обработке /bonuses.")
+        logger.error(f"Ошибка в /history: {e}")
+        await message.answer("Ошибка при получении истории операций.")
 
 @router.message(Command("invite"))
 async def invite_friend(message: types.Message, session: AsyncSession):

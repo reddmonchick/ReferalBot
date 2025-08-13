@@ -8,6 +8,7 @@ from sqladmin import action
 from sqlalchemy import select, func
 from src.referalbot.api.routes import router, log_to_google_sheet, log_bonus_history
 from src.referalbot.database.db import async_session, init_db, engine
+from starlette.middleware.sessions import SessionMiddleware # <--- ДОБАВЛЕН ИМПОРТ
 from src.referalbot.database.models import User, Purchase, BonusHistory
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.orm import Session
@@ -19,6 +20,9 @@ import asyncio
 import os
 
 app = FastAPI()
+
+app.add_middleware(SessionMiddleware, secret_key="a_very_secret_key_for_sessions")
+
 templates = Jinja2Templates(directory="src/referalbot/api/templates")
 bot = Bot(token=TELEGRAM_TOKEN) # Создаем экземпляр бота для отправки сообщений
 
@@ -154,8 +158,8 @@ class UserAdmin(ModelView, model=User):
 
     @action(
         name="reduce_bonus",
-        label="Начислить бонусы",
-        confirmation_message="Перейти к форме для начисления бонусов?",
+        label="Уменьшить бонусы",
+        confirmation_message="Перейти к форме для уменьшения бонусов?",
         add_in_detail=True,
         add_in_list=True,
     )
@@ -179,166 +183,22 @@ class PurchaseAdmin(ModelView, model=Purchase):
     async def create(self, request: Request) -> Response:
         if request.method == "GET":
             # --- ОТЛАДКА ---
-            print("GET /create. Данные в сессии:", request.session.get("last_purchase_data"))
+            print("Отрисовка новой формы (GET). Данные в сессии:", request.session.get("last_purchase_data"))
             
-            # Получаем форму
             Form = await self.scaffold_form()
-            # Получаем данные из сессии
             initial_data = request.session.get("last_purchase_data", {})
-            # Создаем экземпляр формы с начальными данными
-            # Убедитесь, что ключи в initial_data соответствуют именам полей формы
-            # и значения являются строками.
-            form = Form(request, data=initial_data) # <-- Передаем initial_data
+            form = Form(request, data=initial_data)
             context = {"request": request, "model_view": self, "form": form}
-            # Рендерим шаблон формы
             return await self.templates.render(self.create_template, context=context)
+        
+        return await super().create(request)
 
-        # --- Обработка POST ---
-        elif request.method == "POST":
-            # --- ОТЛАДКА ---
-            print("POST /create. Начало обработки.")
-            
-            # 1. Получаем данные формы
-            form_data = await request.form()
-            # --- ОТЛАДКА ---
-            print("Данные формы (POST):", dict(form_data))
-            
-            # 2. Определяем действие
-            save_action = form_data.get("save_action")
-            # --- ОТЛАДКА ---
-            print("Действие:", save_action)
-
-            # 3. Создаем форму для валидации
-            Form = await self.scaffold_form()
-            form = Form(request, form_data)
-            await form.validate() # Важно: валидируем форму
-
-            # 4. Проверяем валидацию
-            if not form.is_valid():
-                # --- ОТЛАДКА ---
-                print("Форма невалидна:", form.errors)
-                # Если форма невалидна, снова показываем её с ошибками
-                context = {"request": request, "model_view": self, "form": form}
-                return await self.templates.render(self.create_template, context=context)
-
-            # 5. Если форма валидна, создаем модель
-            # Создаем экземпляр модели Purchase, но пока не сохраняем в БД
-            model = self.model()
-            # Заполняем модель данными из формы
-            data = form.data  # Это словарь с проверенными данными
-            # --- ОТЛАДКА ---
-            print("Проверенные данные формы:", data)
-            
-            # Вызываем on_model_change для бизнес-логики (например, расчет bonus_amount)
-            # Передаем data, model, is_created=True
-            await self.on_model_change(data, model, is_created=True) # is_created=True для логики в on_model_change
-            
-            # Заполняем модель оставшимися данными (дата, бонусы уже рассчитаны в on_model_change)
-            model.date = datetime.datetime.utcnow()
-            # data может не содержать все поля, которые мы установили в on_model_change
-            # Поэтому копируем их из модели
-            for name, value in data.items():
-                if name != "save_action": # Исключаем служебное поле
-                    setattr(model, name, value)
-                    
-            # --- ОТЛАДКА ---
-            print("Модель перед сохранением:", model.__dict__)
-
-            # 6. Сохраняем модель в БД
-            async with async_session() as session:
-                session.add(model)
-                await session.commit()
-                await session.refresh(model) # Получаем ID
-                # --- ОТЛАДКА ---
-                print("Модель сохранена с ID:", model.id)
-                
-            # 7. Вызываем after_model_change для логики после сохранения (бонусы)
-            # Передаем data, сохраненную модель, is_created=True
-            await self.after_model_change(data, model, is_created=True, request=request)
-
-            # 8. Определяем, куда редиректить
-            if save_action == "save_and_add_another":
-                # Сохраняем данные для предзаполнения следующей формы
-                # Берем из сохраненной модели, так как data может быть неактуальным
-                session_data = {
-                    "user": str(model.user_id), # Преобразуем в строку
-                    "name": model.name,
-                    "amount": str(model.amount),
-                    "discount_applied": str(model.discount_applied)
-                    # bonus_amount и date не сохраняем
-                }
-                request.session["last_purchase_data"] = session_data
-                # --- ОТЛАДКА ---
-                print("'Save and add another' нажата. Сохраненные данные:", session_data)
-                # Редиректим НАЗАД на страницу создания
-                return RedirectResponse(request.url, status_code=303) # 303 See Other для правильного GET-запроса
-                
-            else: # save_action == "save" или не определено
-                # Очищаем сессию
-                request.session.pop("last_purchase_data", None)
-                # --- ОТЛАДКА ---
-                print("'Save' нажата или действие не определено. Данные из сессии очищены.")
-                # Редиректим на страницу списка
-                return RedirectResponse(self.url_path_for('list'), status_code=303)
-
-# Обновите также list, чтобы избежать преждевременной очистки
     async def list(self, request: Request) -> Response:
-    # --- ОТЛАДКА ---
-        print("GET /list. Session contents:", request.session)
-        # При переходе к списку очищаем сессию от временных данных
-        # Но только если мы пришли сюда не из-за "Save and add another"
-        # Так как в create мы сами управляем редиректом, здесь можно просто очистить.
-        # Хотя, если пользователь перешел на список другим способом, очистка не повредит.
+        # --- ОТЛАДКА ---
         if "last_purchase_data" in request.session:
             print("Возврат к списку. Очистка данных из сессии.")
             request.session.pop("last_purchase_data", None)
         return await super().list(request)
-
-# Обновите after_model_change, чтобы он не пытался обрабатывать form_data снова
-    async def after_model_change(self, data: dict, model: Purchase, is_created: bool, request: Request) -> None:
-        print("after_model_change вызван. is_created:", is_created, "model.id:", model.id if model else None)
-    
-    # Эта логика теперь вызывается из нашего кастомного create
-    # и не должна больше пытаться анализировать request.form()
-    
-        if not is_created or not model or model.bonus_amount <= 0:
-            # --- ОТЛАДКА ---
-            print("after_model_change: Условия не выполнены (is_created, model, bonus_amount). Выход.")
-            return
-            
-        # --- Логика начисления бонусов ---
-        async with async_session() as session:
-            # Загружаем Purchase с пользователем и его пригласившим
-            purchase_db = await session.get(Purchase, model.id, options=[selectinload(Purchase.user).selectinload(User.invited_by)])
-            if not (purchase_db and purchase_db.user and purchase_db.user.invited_by):
-                # --- ОТЛАДКА ---
-                print("after_model_change: Пользователь или пригласивший не найдены.")
-                return # Нет пригласившего, бонус не начисляем
-                
-            inviter = purchase_db.user.invited_by
-            user = purchase_db.user
-            
-            # Логируем бонус в истории
-            await log_bonus_history(
-                session, inviter.id, model.bonus_amount,
-                "Начисление", f"За покупку от {user.username}"
-            )
-            
-            # Отправляем уведомление в Telegram
-            if inviter.telegram_id:
-                try:
-                    await bot.send_message(
-                        chat_id=inviter.telegram_id,
-                        text=f"🎉 Вам начислен бонус: +{model.bonus_amount:,} IDR"
-                    )
-                    # --- ОТЛАДКА ---
-                    print(f"Уведомление отправлено пользователю {inviter.telegram_id}")
-                except Exception as e:
-                    print(f"Ошибка отправки уведомления: {e}")
-                    
-            await session.commit()
-            # --- ОТЛАДКА ---
-            print("Бонусы успешно начислены и записаны в БД.")
     
     async def on_model_change(self, data: dict, model: Purchase, is_created: bool, request: Request) -> None:
         async with async_session() as session:
@@ -347,6 +207,54 @@ class PurchaseAdmin(ModelView, model=Purchase):
                 model.bonus_amount = int(round(int(data.get("amount", 0)) * 0.05))
             else:
                 model.bonus_amount = 0
+
+    async def after_model_change(self, data: dict, model: Purchase, is_created: bool, request: Request) -> None:
+        if is_created:
+            form = await request.form()
+            if "save-and-add-another" in form:
+                session_data = {
+                    "user": model.user_id,
+                    "name": model.name,
+                    "amount": model.amount,
+                    "discount_applied": model.discount_applied
+                }
+                request.session["last_purchase_data"] = session_data
+                # --- ОТЛАДКА ---
+                print("Нажата 'Save and add another'. Сохраненные данные:", session_data)
+            
+            elif "save" in form:
+                if "last_purchase_data" in request.session:
+                    request.session.pop("last_purchase_data", None)
+                    # --- ОТЛАДКА ---
+                    print("Нажата 'Save'. Данные из сессии очищены.")
+
+        if not is_created or model.bonus_amount <= 0:
+            return
+
+        async with async_session() as session:
+            purchase_db = await session.get(Purchase, model.id, options=[selectinload(Purchase.user).selectinload(User.invited_by)])
+            if not (purchase_db and purchase_db.user and purchase_db.user.invited_by):
+                request.session.pop("last_purchase_data", None)
+                return
+            
+            inviter = purchase_db.user.invited_by
+            user = purchase_db.user
+
+            await log_bonus_history(
+                session, inviter.id, model.bonus_amount,
+                "Начисление", f"За покупку от {user.username}"
+            )
+
+            if inviter.telegram_id:
+                try:
+                    await bot.send_message(
+                        chat_id=inviter.telegram_id,
+                        text=f"🎉 Вам начислен бонус: +{model.bonus_amount:,} IDR"
+                    )
+                except Exception as e:
+                    print(f"Ошибка отправки уведомления: {e}")
+            
+            await session.commit()
 
 @app.get("/custom/reduce_bonus_form", response_class=HTMLResponse)
 async def reduce_bonus_form(request: Request):

@@ -4,6 +4,7 @@ from referalbot.bot.handlers import router
 from referalbot.bot.middleware import DatabaseMiddleware
 from referalbot.config import TELEGRAM_TOKEN
 from referalbot.database.db import async_session, init_db
+import asyncio
 
 async def set_commands(bot: Bot):
     commands = [
@@ -25,5 +26,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
