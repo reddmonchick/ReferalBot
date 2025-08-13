@@ -66,6 +66,7 @@ class BonusHistory(Base):
     operation = Column(String)
     description = Column(String)
     date = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default='pending', nullable=False) # 'pending' or 'available'
     
     user = relationship('User', back_populates='bonus_history')
 
