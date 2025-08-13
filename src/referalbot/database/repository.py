@@ -1,10 +1,90 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_
+from sqlalchemy import select, func, and_, update
 from datetime import datetime, timedelta
 
-from referalbot.database.models import User, BonusHistory
+from referalbot.database.models import User, BonusHistory, Purchase
 from referalbot.bot.utils import generate_promo_code
+
+
+async def update_pending_bonuses(session: AsyncSession, user_id: int):
+    """
+    Updates the status of pending bonuses older than 14 days to 'available'.
+    """
+    fourteen_days_ago = datetime.utcnow() - timedelta(days=14)
+    stmt = (
+        update(BonusHistory)
+        .where(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.status == 'pending',
+                BonusHistory.date < fourteen_days_ago
+            )
+        )
+        .values(status='available')
+    )
+    await session.execute(stmt)
+
+
+async def get_bonus_balance(session: AsyncSession, user_id: int) -> dict:
+    """
+    Calculates available, pending, and statistical bonus balances for a user.
+    """
+    # First, update statuses of any matured bonuses
+    await update_pending_bonuses(session, user_id)
+
+    # 1. Calculate available balance
+    available_balance_result = await session.execute(
+        select(func.sum(BonusHistory.amount)).where(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.status == 'available'
+            )
+        )
+    )
+    available_balance = available_balance_result.scalar_one_or_none() or 0
+
+    # 2. Calculate pending balance
+    pending_balance_result = await session.execute(
+        select(func.sum(BonusHistory.amount)).where(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.status == 'pending'
+            )
+        )
+    )
+    pending_balance = pending_balance_result.scalar_one_or_none() or 0
+
+    # 3. Calculate statistics
+    one_week_ago = datetime.utcnow() - timedelta(days=7)
+    weekly_earnings_result = await session.execute(
+        select(func.sum(BonusHistory.amount))
+        .filter(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.amount > 0,
+                BonusHistory.date >= one_week_ago
+            )
+        )
+    )
+    weekly_earnings = weekly_earnings_result.scalar_one_or_none() or 0
+
+    total_earned_result = await session.execute(
+        select(func.sum(BonusHistory.amount))
+        .filter(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.amount > 0
+            )
+        )
+    )
+    total_earned = total_earned_result.scalar_one_or_none() or 0
+
+    return {
+        "available_balance": available_balance,
+        "pending_balance": pending_balance,
+        "weekly_earnings": weekly_earnings,
+        "total_earned": total_earned,
+    }
 
 
 async def get_or_create_user(session: AsyncSession, telegram_id: int, username: str) -> User:
@@ -40,40 +120,6 @@ async def get_user_by_promo_code(session: AsyncSession, promo_code: str) -> User
     """
     result = await session.execute(select(User).filter_by(promo_code=promo_code))
     return result.scalar_one_or_none()
-
-
-async def get_bonus_balance(session: AsyncSession, user_id: int) -> dict:
-    """
-    Calculates the available and pending bonus balance for a user.
-    """
-    fourteen_days_ago = datetime.utcnow() - timedelta(days=14)
-
-    # 1. Calculate total balance (all transactions)
-    total_balance_result = await session.execute(
-        select(func.sum(BonusHistory.amount)).filter_by(user_id=user_id)
-    )
-    total_balance = total_balance_result.scalar_one_or_none() or 0
-
-    # 2. Calculate pending balance (positive transactions in the last 14 days)
-    pending_balance_result = await session.execute(
-        select(func.sum(BonusHistory.amount))
-        .filter(
-            and_(
-                BonusHistory.user_id == user_id,
-                BonusHistory.amount > 0,
-                BonusHistory.date >= fourteen_days_ago
-            )
-        )
-    )
-    pending_balance = pending_balance_result.scalar_one_or_none() or 0
-
-    # 3. Available balance is total minus pending
-    available_balance = total_balance - pending_balance
-
-    return {
-        "available_balance": available_balance,
-        "pending_balance": pending_balance,
-    }
 
 
 async def get_bonus_history(session: AsyncSession, user_id: int, limit: int = 15) -> list[BonusHistory]:

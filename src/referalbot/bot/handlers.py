@@ -1,14 +1,8 @@
-from aiogram import Router, types, F
+from aiogram import Router, types
 from aiogram.filters import Command, CommandStart
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timedelta
-from sqlalchemy import func # Импортируем func для использования SUM
-from referalbot.database.models import User, Purchase, BonusHistory
 from referalbot.database import repository
-# Импортируем функцию логирования и модель Purchase
-from referalbot.api.routes import log_bonus_history
 from referalbot.utils import logger
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import Bot
 from referalbot.config import TELEGRAM_TOKEN
 
@@ -33,7 +27,7 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
             user = await repository.get_or_create_user(session, telegram_id, username)
             inviter = await repository.get_user_by_promo_code(session, ref_code_clean)
             
-            if inviter and inviter.telegram_id != telegram_id:
+            if inviter and inviter.telegram_id != telegram_id and not user.invited_by_id:
                 user.invited_by_id = inviter.id
                 await message.answer(
                     f"Добро пожаловать, {username}!\n"
@@ -46,7 +40,7 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
                     f"Добро пожаловать, {username}!\n"
                     f"Ваш промокод: {user.promo_code}\n"
                     f"Приглашайте друзей: t.me/bali_referal_bot?start=REF_{user.promo_code}\n"
-                    f"Реферальный код {ref_code} недействителен."
+                    f"Реферальный код {ref_code} недействителен или вы уже использовали код."
                 )
                 
     except Exception as e:
@@ -76,12 +70,10 @@ async def start(message: types.Message, session: AsyncSession):
 async def get_promo(message: types.Message, session: AsyncSession):
     logger.info(f"Обработка /promo для пользователя {message.from_user.id}")
     try:
-        telegram_id = message.from_user.id
-        async with session.begin():
-            user = await repository.get_user_by_telegram_id(session, telegram_id)
-            if not user:
-                await message.answer("Сначала используйте /start.")
-                return
+        user = await repository.get_user_by_telegram_id(session, message.from_user.id)
+        if not user:
+            await message.answer("Сначала используйте /start.")
+            return
         await message.answer(
             f"Ваш промокод: {user.promo_code}\n"
             f"Приглашайте друзей: t.me/bali_referal_bot?start=REF_{user.promo_code}"
@@ -111,31 +103,35 @@ async def help_command(message: types.Message):
 async def check_bonuses(message: types.Message, session: AsyncSession):
     """
     Обработчик команды /bonuses.
-    Показывает доступный и ожидающий начисления баланс.
+    Показывает баланс и статистику по бонусам.
     """
     logger.info(f"Обработка /bonuses для пользователя {message.from_user.id}")
     try:
-        telegram_id = message.from_user.id
         async with session.begin():
-            user = await repository.get_user_by_telegram_id(session, telegram_id)
+            user = await repository.get_user_by_telegram_id(session, message.from_user.id)
             if not user:
                 await message.answer("Сначала используйте /start.")
                 return
 
             balance_data = await repository.get_bonus_balance(session, user.id)
-            
-            available_balance = balance_data['available_balance']
-            pending_balance = balance_data['pending_balance']
 
-            await message.answer(
-                f"💳 *Ваш бонусный баланс:*\n\n"
-                f"✅ *Доступно к списанию:*\n"
-                f"**{available_balance:,} IDR**\n\n"
-                f"⏳ *Ожидают начисления:*\n"
-                f"**{pending_balance:,} IDR**\n\n"
-                f"_Для выплаты бонусов свяжитесь с администратором._",
-                parse_mode="Markdown"
-            )
+        available = balance_data['available_balance']
+        pending = balance_data['pending_balance']
+        weekly = balance_data['weekly_earnings']
+        total = balance_data['total_earned']
+
+        response_text = (
+            f"💳 *Ваш бонусный баланс:*\n\n"
+            f"✅ Доступно к списанию: **{available:,} IDR**\n"
+            f"⏳ Ожидают начисления: **{pending:,} IDR**\n\n"
+            f"📊 *Статистика начислений:*\n"
+            f"За последнюю неделю: **+{weekly:,} IDR**\n"
+            f"За всё время: **+{total:,} IDR**\n\n"
+            f"_Для выплаты бонусов свяжитесь с администратором._"
+        )
+
+        await message.answer(response_text, parse_mode="Markdown")
+
     except Exception as e:
         logger.error(f"Ошибка в /bonuses: {e}")
         await message.answer("Произошла ошибка при проверке бонусов.")
@@ -143,31 +139,33 @@ async def check_bonuses(message: types.Message, session: AsyncSession):
 @router.message(Command("history"))
 async def bonus_history(message: types.Message, session: AsyncSession):
     """
-    Этот обработчик уже был почти правильным, немного улучшим форматирование.
+    Показывает историю операций с бонусами.
     """
     logger.info(f"Обработка /history для пользователя {message.from_user.id}")
     try:
-        telegram_id = message.from_user.id
         async with session.begin():
-            user = await repository.get_user_by_telegram_id(session, telegram_id)
+            user = await repository.get_user_by_telegram_id(session, message.from_user.id)
             if not user:
                 await message.answer("Сначала используйте /start.")
                 return
 
             history = await repository.get_bonus_history(session, user.id)
 
-            if not history:
-                await message.answer("История операций с бонусами пуста.")
-                return
+        if not history:
+            await message.answer("История операций с бонусами пуста.")
+            return
 
-            response = "📜 **Последние 15 операций:**\n\n"
-            for entry in history:
-                amount_formatted = f"{entry.amount:,}"
-                sign = "+" if entry.amount > 0 else ""
-                response += f"`{entry.date.strftime('%d.%m.%Y')}`: **{sign}{amount_formatted} IDR**\n"
-                response += f"_{entry.operation} ({entry.description})_\n\n"
+        response_lines = ["📜 **Последние 15 операций:**\n"]
+        for entry in history:
+            sign = "+" if entry.amount > 0 else ""
+            amount_formatted = f"{entry.amount:,}"
+            date_formatted = entry.date.strftime('%d.%m.%Y')
 
-            await message.answer(response, parse_mode="Markdown")
+            line = f"`{date_formatted}`: **{sign}{amount_formatted} IDR**\n_{entry.operation} ({entry.description})_"
+            response_lines.append(line)
+
+        await message.answer("\n\n".join(response_lines), parse_mode="Markdown")
+
     except Exception as e:
         logger.error(f"Ошибка в /history: {e}")
         await message.answer("Ошибка при получении истории операций.")
@@ -176,12 +174,10 @@ async def bonus_history(message: types.Message, session: AsyncSession):
 async def invite_friend(message: types.Message, session: AsyncSession):
     logger.info(f"Обработка /invite для пользователя {message.from_user.id}")
     try:
-        telegram_id = message.from_user.id
-        async with session.begin():
-            user = await repository.get_user_by_telegram_id(session, telegram_id)
-            if not user:
-                await message.answer("Сначала используйте /start.")
-                return
+        user = await repository.get_user_by_telegram_id(session, message.from_user.id)
+        if not user:
+            await message.answer("Сначала используйте /start.")
+            return
         await message.answer(
             f"Приглашайте друзей: t.me/bali_referal_bot?start=REF_{user.promo_code}"
         )

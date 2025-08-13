@@ -20,11 +20,17 @@ class PurchaseUpdate(BaseModel):
     bonus_paid: bool
 
 async def log_bonus_history(session, user_id, amount, operation, description):
+    # Определяем статус в зависимости от операции
+    # Начисления (положительная сумма) -> 'pending'
+    # Списания (отрицательная сумма) -> 'available'
+    status = 'pending' if amount > 0 else 'available'
+
     history = BonusHistory(
         user_id=user_id,
         amount=amount,
         operation=operation,
-        description=description
+        description=description,
+        status=status
     )
     session.add(history)
     await session.flush() # Используем flush для немедленной записи без коммита
