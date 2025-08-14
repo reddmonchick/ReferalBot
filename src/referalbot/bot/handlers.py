@@ -70,7 +70,8 @@ async def start(message: types.Message, session: AsyncSession):
 async def get_promo(message: types.Message, session: AsyncSession):
     logger.info(f"Обработка /promo для пользователя {message.from_user.id}")
     try:
-        user = await repository.get_user_by_telegram_id(session, message.from_user.id)
+        async with session.begin():
+            user = await repository.get_user_by_telegram_id(session, message.from_user.id)
         if not user:
             await message.answer("Сначала используйте /start.")
             return
@@ -174,7 +175,8 @@ async def bonus_history(message: types.Message, session: AsyncSession):
 async def invite_friend(message: types.Message, session: AsyncSession):
     logger.info(f"Обработка /invite для пользователя {message.from_user.id}")
     try:
-        user = await repository.get_user_by_telegram_id(session, message.from_user.id)
+        async with session.begin():
+            user = await repository.get_user_by_telegram_id(session, message.from_user.id)
         if not user:
             await message.answer("Сначала используйте /start.")
             return
