@@ -36,6 +36,18 @@ class User(Base):
             .label('total_bonus')
         )
 
+    @property
+    def available_bonus(self) -> int:
+        """Synchronous property to calculate available bonus for admin panel."""
+        # Note: This does not trigger the 'update_pending_bonuses' logic.
+        # The admin panel view might have a slight delay in bonus maturation.
+        return sum(h.amount for h in self.bonus_history if h.status == 'available')
+
+    @property
+    def pending_bonus(self) -> int:
+        """Synchronous property to calculate pending bonus for admin panel."""
+        return sum(h.amount for h in self.bonus_history if h.status == 'pending' and h.amount > 0)
+
     # Эта функция отвечает за красивое отображение в админке
     def __str__(self) -> str:
         return f"{self.username or 'User'} (ID: {self.id})"
@@ -51,7 +63,7 @@ class Purchase(Base):
     discount_applied = Column(Integer, default=5)
     bonus_amount = Column(BigInteger, nullable=False, default=0)
     date = Column(DateTime, default=datetime.utcnow)
-    # bonus_paid = Column(Boolean, default=False) # ЗАКОММЕНТИРОВАЛИ
+    bonus_paid = Column(Boolean, default=False) # ЗАКОММЕНТИРОВАЛИ
     
     user = relationship('User', back_populates='purchases')
 
@@ -66,7 +78,7 @@ class BonusHistory(Base):
     operation = Column(String)
     description = Column(String)
     date = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default='pending', nullable=False) # 'pending' or 'available'
+    status = Column(String, default='pending', nullable=False)
     
     user = relationship('User', back_populates='bonus_history')
 

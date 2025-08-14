@@ -9,6 +9,7 @@ from sqlalchemy import select, func
 from src.referalbot.api.routes import router, log_to_google_sheet, log_bonus_history
 from src.referalbot.database.db import async_session, init_db, engine
 from src.referalbot.database.models import User, Purchase, BonusHistory
+from src.referalbot.database import repository
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
@@ -59,11 +60,11 @@ class UserAdmin(ModelView, model=User):
     name = "Пользователь"
     name_plural = "Пользователи"
     icon = "fa-solid fa-user"
-    column_list = [User.id, User.telegram_id, User.username, User.total_bonus]
+    column_list = [User.id, User.telegram_id, User.username, "available_bonus", "pending_bonus"]
     column_searchable_list = ["username", "promo_code", "telegram_id"]
     column_details_list = [
         User.id, User.telegram_id, User.username, User.promo_code,
-        "invited_by", "referrals", "bonus_history", User.total_bonus
+        "invited_by", "referrals", "bonus_history", "available_bonus", "pending_bonus"
     ]
     
     column_formatters = {
@@ -71,16 +72,17 @@ class UserAdmin(ModelView, model=User):
             [f"{ref.username} (ID: {ref.telegram_id})" for ref in m.referrals]
         ) if m.referrals else "-",
         "bonus_history": lambda m, a: "<br>".join(
-            [f"{h.date.strftime('%Y-%m-%d')}: {h.amount:+,} IDR ({h.operation})" 
+            [f"{h.date.strftime('%Y-%m-%d')}: {h.amount:+,} IDR ({h.operation}, {h.status})"
              for h in sorted(m.bonus_history, key=lambda x: x.date, reverse=True)]
         ) if m.bonus_history else "Нет операций",
-        User.total_bonus: lambda m, a: f"{m.total_bonus:}"
+        "available_bonus": lambda m, a: f"{m.available_bonus:,}",
+        "pending_bonus": lambda m, a: f"{m.pending_bonus:,}",
     }
     
     async def get_query_for_list(self, session, *args, **kwargs):
-        """Запрос для списка пользователей с вычислением total_bonus"""
+        """Запрос для списка пользователей с предзагрузкой истории бонусов."""
         return await session.execute(
-            select(User).add_columns(User.total_bonus)
+            select(User).options(selectinload(User.bonus_history))
         )
     
     async def get_query_for_details(self, session, pk):
@@ -102,18 +104,34 @@ class UserAdmin(ModelView, model=User):
     )
     async def reset_bonus_action(self, request: Request):
         pks = request.query_params.getlist("pks")
+        if not pks:
+            return JSONResponse({"message": "Не выбраны пользователи"}, status_code=400)
+
+        messages = []
         async with async_session() as session:
-            for pk in pks:
-                purchases_res = await session.execute(
-                    select(Purchase)
-                    .join(User, Purchase.user_id == User.id)
-                    .filter(User.invited_by_id == int(pk), Purchase.bonus_paid == False)
-                )
-                for purchase in purchases_res.scalars().all():
-                    if purchase.bonus_amount > 0:
-                        await log_bonus_history(session, int(pk), purchase.bonus_amount, "Выплата (Админ)", f"Покупка ID: {purchase.id}")
-            await session.commit()
-        return JSONResponse({"message": "Бонусы сброшены и отмечены как выплаченные."})
+            async with session.begin():
+                for pk in pks:
+                    user_id = int(pk)
+                    user = await session.get(User, user_id)
+                    username = user.username if user else f"ID {user_id}"
+
+                    balance_data = await repository.get_bonus_balance(session, user_id)
+                    available_balance = balance_data['available_balance']
+
+                    if available_balance <= 0:
+                        messages.append(f"❌ Для пользователя {username}: нет доступных бонусов для выплаты.")
+                        continue
+
+                    await log_bonus_history(
+                        session,
+                        user_id,
+                        -available_balance,
+                        "Выплата (Админ)",
+                        "Выплата всего доступного баланса"
+                    )
+                    messages.append(f"✅ Для пользователя {username}: выплачен доступный баланс в размере {available_balance:,} IDR.")
+
+        return JSONResponse({"message": " ".join(messages)})
 
     @action(
         name="delete_bonus",
@@ -122,50 +140,52 @@ class UserAdmin(ModelView, model=User):
         add_in_detail=True,
         add_in_list=True,
     )
-    async def delete_bonus_action(self, request):
+    async def delete_bonus_action(self, request: Request):
         pks = request.query_params.getlist('pks')
         if not pks:
             return JSONResponse({"message": "Не выбраны пользователи"}, status_code=400)
+
+        messages = []
         async with async_session() as session:
-            for pk in pks:
-                result = await session.execute(
-                    select(Purchase).join(User, Purchase.user_id == User.id)
-                    .filter(User.invited_by_id == int(pk), Purchase.bonus_paid == False)
-                )
-                purchases = result.scalars().all()
-                for purchase in purchases:
-                    old_bonus = purchase.bonus_amount
-                    if old_bonus > 0:
-                        await log_bonus_history(
-                            session,
-                            int(pk),
-                            -old_bonus,
-                            "Удаление (Админ)",
-                            f"Удаление бонуса по покупке ID: {purchase.id}"
-                        )
-                    purchase.bonus_amount = 0
-                    print(f"Purchase {purchase.id}: bonus_amount {old_bonus} -> 0")
-                    user = await session.execute(select(User).filter_by(id=purchase.user_id))
-                    user = user.scalar_one_or_none()
-                    if user:
-                        pass
-                await session.commit()
-        return JSONResponse({"message": "Бонусы удалены"})
+            async with session.begin():
+                for pk in pks:
+                    user_id = int(pk)
+                    user = await session.get(User, user_id)
+                    username = user.username if user else f"ID {user_id}"
+
+                    # We are deleting the entire available balance.
+                    balance_data = await repository.get_bonus_balance(session, user_id)
+                    available_balance = balance_data['available_balance']
+
+                    if available_balance <= 0:
+                        messages.append(f"❌ Для пользователя {username}: нет доступных бонусов для удаления.")
+                        continue
+
+                    # Log a single transaction to delete the entire available balance.
+                    await log_bonus_history(
+                        session,
+                        user_id,
+                        -available_balance,
+                        "Удаление (Админ)",
+                        "Полное удаление доступного баланса"
+                    )
+                    messages.append(f"✅ Для пользователя {username}: доступный баланс в размере {available_balance:,} IDR был удален.")
+
+        return JSONResponse({"message": " ".join(messages)})
 
     @action(
         name="reduce_bonus",
-        label="Начислить бонусы",
-        confirmation_message="Перейти к форме для начисления бонусов?",
+        label="Списать бонусы",
+        confirmation_message="Перейти к форме для списания бонусов?",
         add_in_detail=True,
         add_in_list=True,
     )
-    async def reduce_bonus_action(self, request):
+    async def reduce_bonus_action(self, request: Request):
         pks = request.query_params.getlist('pks')
         if not pks:
             return JSONResponse({"message": "Не выбраны пользователи"}, status_code=400)
         pks_query = "&".join([f"pks={pk}" for pk in pks])
         redirect_url = f"/custom/reduce_bonus_form?{pks_query}"
-        print(f"Redirecting to: {redirect_url}")
         return RedirectResponse(url=redirect_url, status_code=302)
 
 class PurchaseAdmin(ModelView, model=Purchase):
@@ -359,64 +379,54 @@ async def reduce_bonus_form(request: Request):
 @app.post("/custom/reduce_bonus", response_class=HTMLResponse)
 async def reduce_bonus(request: Request):
     form = await request.form()
-    amount_to_reduce = int(form.get("amount", 100))
+    amount_to_reduce = int(form.get("amount", 0))
     pks = form.getlist("pks")
+    messages = []
+
     if not pks:
         return templates.TemplateResponse(
             "reduce_bonus_success.html",
-            {"request": request, "message": "Не выбраны пользователи"}
+            {"request": request, "message": "Ошибка: Не выбраны пользователи."}
         )
     
     if amount_to_reduce <= 0:
         return templates.TemplateResponse(
             "reduce_bonus_success.html",
-            {"request": request, "message": "Сумма для уменьшения должна быть положительной"}
+            {"request": request, "message": "Ошибка: Сумма для списания должна быть положительной."}
         )
 
     async with async_session() as session:
-        for pk in pks:
-            result = await session.execute(
-                select(Purchase)
-                .join(User, Purchase.user_id == User.id)
-                .filter(User.invited_by_id == int(pk))
-                .order_by(Purchase.date)
-            )
-            purchases = result.scalars().all()
-            
-            remaining_amount_to_reduce = amount_to_reduce
-            
-            for purchase in purchases:
-                if remaining_amount_to_reduce <= 0:
-                    break
+        async with session.begin():
+            for pk in pks:
+                user_id = int(pk)
                 
-                old_bonus = purchase.bonus_amount
-                reduction = min(old_bonus, remaining_amount_to_reduce)
+                # Получаем актуальный доступный баланс
+                balance_data = await repository.get_bonus_balance(session, user_id)
+                available_balance = balance_data['available_balance']
                 
-                if reduction > 0:
-                    purchase.bonus_amount = old_bonus - reduction
-                    print(f"Purchase {purchase.id}: bonus_amount {old_bonus} -> {purchase.bonus_amount}")
-                    
-                    await log_bonus_history(
-                        session,
-                        int(pk),
-                        -reduction,
-                        "Уменьшение (Админ)",
-                        f"Уменьшение по покупке ID {purchase.id}"
-                    )
-                    
-                    remaining_amount_to_reduce -= reduction
-            
-            await session.commit()
-            
-            if remaining_amount_to_reduce > 0:
-                message = f"Бонусы уменьшены на {amount_to_reduce - remaining_amount_to_reduce} IDR. " \
-                          f"Невозможно списать оставшиеся {remaining_amount_to_reduce} IDR (недостаточно бонусов)."
-            else:
-                message = f"Бонусы успешно уменьшены на {amount_to_reduce} IDR."
+                user = await session.get(User, user_id)
+                username = user.username if user else f"ID {user_id}"
+
+                # Проверяем, достаточно ли средств
+                if available_balance < amount_to_reduce:
+                    message = f"❌ Для пользователя {username}: Недостаточно бонусов для списания. " \
+                              f"Доступно: {available_balance}, требуется: {amount_to_reduce}."
+                    messages.append(message)
+                    continue
+
+                # Если средств достаточно, производим списание
+                await log_bonus_history(
+                    session,
+                    user_id,
+                    -amount_to_reduce,
+                    "Списание (Админ)",
+                    f"Списание через админ-панель"
+                )
+                messages.append(f"✅ Для пользователя {username}: Бонусы успешно списаны на {amount_to_reduce:,} IDR.")
 
     return templates.TemplateResponse(
         "reduce_bonus_success.html",
-        {"request": request, "message": message}
+        {"request": request, "message": "\n".join(messages)}
     )
 
 class BonusHistoryAdmin(ModelView, model=BonusHistory):
