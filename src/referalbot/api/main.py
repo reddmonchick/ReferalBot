@@ -67,12 +67,24 @@ class UserAdmin(ModelView, model=User):
         "invited_by", "referrals", "bonus_history", "available_bonus", "pending_bonus"
     ]
     
+    column_labels = {
+        'id': 'ID',
+        'telegram_id': 'Telegram ID',
+        'username': 'Имя пользователя',
+        'promo_code': 'Промокод',
+        'invited_by': 'Пригласил',
+        'referrals': 'Рефералы',
+        'bonus_history': 'История бонусов',
+        'available_bonus': 'Доступные бонусы',
+        'pending_bonus': 'Ожидающие бонусы',
+    }
+
     column_formatters = {
         "referrals": lambda m, a: "<br>".join(
             [f"{ref.username} (ID: {ref.telegram_id})" for ref in m.referrals]
         ) if m.referrals else "-",
         "bonus_history": lambda m, a: "<br>".join(
-            [f"{h.date.strftime('%Y-%m-%d')}: {h.amount:+,} IDR ({h.operation}, {h.status})"
+            [f"{h.date.strftime('%Y-%m-%d')}: {h.amount:+,} IDR ({h.operation}, {'Ожидание' if h.status == 'pending' else 'Доступен'})"
              for h in sorted(m.bonus_history, key=lambda x: x.date, reverse=True)]
         ) if m.bonus_history else "Нет операций",
         "available_bonus": lambda m, a: f"{m.available_bonus:,}",
@@ -154,6 +166,14 @@ class PurchaseAdmin(ModelView, model=Purchase):
     icon = "fa-solid fa-shopping-cart"
     
     column_list = [Purchase.id, "user", Purchase.name, Purchase.amount, Purchase.bonus_amount, Purchase.date]
+    column_labels = {
+        'id': 'ID',
+        'user': 'Пользователь',
+        'name': 'Название',
+        'amount': 'Сумма',
+        'bonus_amount': 'Сумма бонуса',
+        'date': 'Дата',
+    }
     form_excluded_columns = [Purchase.bonus_amount, Purchase.date]
     form_args = {
         'user': {'label': 'Пользователь'},
@@ -387,6 +407,13 @@ class BonusHistoryAdmin(ModelView, model=BonusHistory):
     can_edit = False
     can_delete = False
     column_list = [BonusHistory.date, "user", BonusHistory.amount, BonusHistory.operation, BonusHistory.description]
+    column_labels = {
+        'date': 'Дата',
+        'user': 'Пользователь',
+        'amount': 'Сумма',
+        'operation': 'Операция',
+        'description': 'Описание',
+    }
 
     column_formatters = {
         "user": lambda m, a: f"{m.user.username} (ID: {m.user_id})" if m.user else f"ID: {m.user_id}"
