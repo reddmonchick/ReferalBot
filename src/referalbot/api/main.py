@@ -134,44 +134,6 @@ class UserAdmin(ModelView, model=User):
         return JSONResponse({"message": " ".join(messages)})
 
     @action(
-        name="delete_bonus",
-        label="Удалить бонусы",
-        confirmation_message="Вы уверены, что хотите удалить бонусы для выбранных пользователей?",
-        add_in_detail=True,
-        add_in_list=True,
-    )
-    async def delete_bonus_action(self, request: Request):
-        pks = request.query_params.getlist('pks')
-        if not pks:
-            return JSONResponse({"message": "Пользователи не выбраны"}, status_code=400)
-
-        messages = []
-        async with async_session() as session:
-            async with session.begin():
-                for pk in pks:
-                    user_id = int(pk)
-                    user = await session.get(User, user_id)
-                    username = user.username if user else f"ID {user_id}"
-
-                    balance_data = await repository.get_bonus_balance(session, user_id)
-                    available_balance = balance_data['available_balance']
-
-                    if available_balance <= 0:
-                        messages.append(f"❌ Для пользователя {username}: нет доступных бонусов для удаления.")
-                        continue
-
-                    await log_bonus_history(
-                        session,
-                        user_id,
-                        -available_balance,
-                        "Удаление (Админ)",
-                        "Полное удаление доступного баланса"
-                    )
-                    messages.append(f"✅ Для пользователя {username}: доступный баланс в размере {available_balance:,} IDR был удален.")
-
-        return JSONResponse({"message": " ".join(messages)})
-
-    @action(
         name="add_bonus",
         label="Начислить бонусы",
         confirmation_message="Перейти к форме для начисления бонусов?",
@@ -186,21 +148,6 @@ class UserAdmin(ModelView, model=User):
         redirect_url = f"/custom/add_bonus_form?{pks_query}"
         return RedirectResponse(url=redirect_url, status_code=302)
 
-    @action(
-        name="reduce_bonus",
-        label="Списать бонусы",
-        confirmation_message="Перейти к форме для списания бонусов?",
-        add_in_detail=True,
-        add_in_list=True,
-    )
-    async def reduce_bonus_action(self, request: Request):
-        pks = request.query_params.getlist('pks')
-        if not pks:
-            return JSONResponse({"message": "Не выбраны пользователи"}, status_code=400)
-        pks_query = "&".join([f"pks={pk}" for pk in pks])
-        redirect_url = f"/custom/reduce_bonus_form?{pks_query}"
-        return RedirectResponse(url=redirect_url, status_code=302)
-
 class PurchaseAdmin(ModelView, model=Purchase):
     name = "Покупка"
     name_plural = "Покупки"
@@ -208,6 +155,12 @@ class PurchaseAdmin(ModelView, model=Purchase):
     
     column_list = [Purchase.id, "user", Purchase.name, Purchase.amount, Purchase.bonus_amount, Purchase.date]
     form_excluded_columns = [Purchase.bonus_amount, Purchase.date]
+    form_args = {
+        'user': {'label': 'Пользователь'},
+        'name': {'label': 'Название'},
+        'amount': {'label': 'Сумма'},
+        'discount_applied': {'label': 'Скидка применена'}
+    }
 
     async def create(self, request: Request) -> Response:
         if request.method == "GET":
@@ -428,62 +381,6 @@ async def add_bonus(request: Request):
         {"request": request, "message": "\n".join(messages)}
     )
 
-@app.get("/custom/reduce_bonus_form", response_class=HTMLResponse)
-async def reduce_bonus_form(request: Request):
-    return templates.TemplateResponse(
-        "reduce_bonus_form.html",
-        {"request": request}
-    )
-
-@app.post("/custom/reduce_bonus", response_class=HTMLResponse)
-async def reduce_bonus(request: Request):
-    form = await request.form()
-    amount_to_reduce = int(form.get("amount", 0))
-    pks = form.getlist("pks")
-    messages = []
-
-    if not pks:
-        return templates.TemplateResponse(
-            "reduce_bonus_success.html",
-            {"request": request, "message": "Ошибка: Не выбраны пользователи."}
-        )
-    
-    if amount_to_reduce <= 0:
-        return templates.TemplateResponse(
-            "reduce_bonus_success.html",
-            {"request": request, "message": "Ошибка: Сумма для списания должна быть положительной."}
-        )
-
-    async with async_session() as session:
-        async with session.begin():
-            for pk in pks:
-                user_id = int(pk)
-                
-                balance_data = await repository.get_bonus_balance(session, user_id)
-                available_balance = balance_data['available_balance']
-                
-                user = await session.get(User, user_id)
-                username = user.username if user else f"ID {user_id}"
-
-                if available_balance < amount_to_reduce:
-                    message = f"❌ Для пользователя {username}: Недостаточно бонусов для списания. " \
-                              f"Доступно: {available_balance}, требуется: {amount_to_reduce}."
-                    messages.append(message)
-                    continue
-
-                await log_bonus_history(
-                    session,
-                    user_id,
-                    -amount_to_reduce,
-                    "Списание (Админ)",
-                    f"Списание через админ-панель"
-                )
-                messages.append(f"✅ Для пользователя {username}: Бонусы успешно списаны на {amount_to_reduce:,} IDR.")
-
-    return templates.TemplateResponse(
-        "reduce_bonus_success.html",
-        {"request": request, "message": "\n".join(messages)}
-    )
 
 class BonusHistoryAdmin(ModelView, model=BonusHistory):
     can_create = False
