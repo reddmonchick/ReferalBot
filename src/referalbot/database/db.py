@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from referalbot.config import DATABASE_URL
-from referalbot.database.models import Base
+from src.referalbot.config import DATABASE_URL
+from src.referalbot.database.models import Base
 
 print(DATABASE_URL)
 

@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, update
 from datetime import datetime, timedelta
 
-from referalbot.database.models import User, BonusHistory
-from referalbot.bot.utils import generate_promo_code
+from src.referalbot.database.models import User, BonusHistory
+from src.referalbot.bot.utils import generate_promo_code
 
 
 async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:

@@ -1,10 +1,10 @@
 from aiogram import Router, types
 from aiogram.filters import Command, CommandStart
 from sqlalchemy.ext.asyncio import AsyncSession
-from referalbot.database import repository
-from referalbot.utils import logger
+from src.referalbot.database import repository
+from src.referalbot.utils import logger
 from aiogram import Bot
-from referalbot.config import TELEGRAM_TOKEN
+from src.referalbot.config import TELEGRAM_TOKEN
 
 router = Router()
 bot = Bot(token=TELEGRAM_TOKEN)

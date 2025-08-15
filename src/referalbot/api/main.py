@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 import datetime
 from aiogram import Bot
-from referalbot.config import TELEGRAM_TOKEN
+from src.referalbot.config import TELEGRAM_TOKEN
 import asyncio
 import os
 

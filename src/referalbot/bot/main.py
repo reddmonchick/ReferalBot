@@ -1,9 +1,9 @@
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
-from referalbot.bot.handlers import router
-from referalbot.bot.middleware import DatabaseMiddleware
-from referalbot.config import TELEGRAM_TOKEN
-from referalbot.database.db import async_session, init_db
+from src.referalbot.bot.handlers import router
+from src.referalbot.bot.middleware import DatabaseMiddleware
+from src.referalbot.config import TELEGRAM_TOKEN
+from src.referalbot.database.db import async_session, init_db
 import asyncio
 
 async def set_commands(bot: Bot):

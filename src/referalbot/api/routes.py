@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, func
-from referalbot.database.models import User, Purchase, BonusHistory
-from referalbot.database.db import async_session
+from src.referalbot.database.models import User, Purchase, BonusHistory
+from src.referalbot.database.db import async_session
 from pydantic import BaseModel
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from aiogram import Bot
-from referalbot.config import TELEGRAM_TOKEN
+from src.referalbot.config import TELEGRAM_TOKEN
 
 router = APIRouter()
 bot = Bot(token=TELEGRAM_TOKEN) # Создаем экземпляр бота для отправки сообщений
