@@ -32,7 +32,7 @@ class AdminAuth(AuthenticationBackend):
         form = await request.form()
         username, password = form.get("username"), form.get("password")
         correct_username = "admin"
-        correct_password = "admin123"
+        correct_password = "AdminBaliLove13"
         if username == correct_username and password == correct_password:
             request.session.update({"token": "admin_token"})
             return True

@@ -3564,3 +3564,117 @@ WHERE bonus_history.user_id IN ($1::BIGINT)
 2025-08-14 19:24:17,114 - INFO - [base] [generated in 0.00046s] (1, 2)
 2025-08-14 19:24:17,115 - INFO - [base] COMMIT
 2025-08-14 19:24:17,116 - INFO - [dispatcher] Update id=433007854 is handled. Duration 1172 ms by bot id=7524145939
+2025-08-15 17:01:10,635 - INFO - [base] select pg_catalog.version()
+2025-08-15 17:01:10,636 - INFO - [base] [raw sql] ()
+2025-08-15 17:01:10,637 - INFO - [base] select current_schema()
+2025-08-15 17:01:10,637 - INFO - [base] [raw sql] ()
+2025-08-15 17:01:10,638 - INFO - [base] show standard_conforming_strings
+2025-08-15 17:01:10,638 - INFO - [base] [raw sql] ()
+2025-08-15 17:01:10,639 - INFO - [base] BEGIN (implicit)
+2025-08-15 17:01:10,642 - INFO - [base] SELECT pg_catalog.pg_class.relname 
+FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace ON pg_catalog.pg_namespace.oid = pg_catalog.pg_class.relnamespace 
+WHERE pg_catalog.pg_class.relname = $1::VARCHAR AND pg_catalog.pg_class.relkind = ANY (ARRAY[$2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR]) AND pg_catalog.pg_table_is_visible(pg_catalog.pg_class.oid) AND pg_catalog.pg_namespace.nspname != $7::VARCHAR
+2025-08-15 17:01:10,643 - INFO - [base] [generated in 0.00064s] ('users', 'r', 'p', 'f', 'v', 'm', 'pg_catalog')
+2025-08-15 17:01:10,645 - INFO - [base] SELECT pg_catalog.pg_class.relname 
+FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace ON pg_catalog.pg_namespace.oid = pg_catalog.pg_class.relnamespace 
+WHERE pg_catalog.pg_class.relname = $1::VARCHAR AND pg_catalog.pg_class.relkind = ANY (ARRAY[$2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR]) AND pg_catalog.pg_table_is_visible(pg_catalog.pg_class.oid) AND pg_catalog.pg_namespace.nspname != $7::VARCHAR
+2025-08-15 17:01:10,645 - INFO - [base] [cached since 0.003012s ago] ('purchases', 'r', 'p', 'f', 'v', 'm', 'pg_catalog')
+2025-08-15 17:01:10,646 - INFO - [base] SELECT pg_catalog.pg_class.relname 
+FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace ON pg_catalog.pg_namespace.oid = pg_catalog.pg_class.relnamespace 
+WHERE pg_catalog.pg_class.relname = $1::VARCHAR AND pg_catalog.pg_class.relkind = ANY (ARRAY[$2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR]) AND pg_catalog.pg_table_is_visible(pg_catalog.pg_class.oid) AND pg_catalog.pg_namespace.nspname != $7::VARCHAR
+2025-08-15 17:01:10,646 - INFO - [base] [cached since 0.004253s ago] ('bonus_history', 'r', 'p', 'f', 'v', 'm', 'pg_catalog')
+2025-08-15 17:01:10,647 - INFO - [base] COMMIT
+2025-08-15 17:01:10,810 - INFO - [dispatcher] Start polling
+2025-08-15 17:01:11,799 - INFO - [dispatcher] Run polling for bot @bali_referal_bot id=7524145939 - 'Leoparbonus'
+2025-08-15 17:01:13,911 - INFO - [handlers] Обработка /start для пользователя 1758719447
+2025-08-15 17:01:13,912 - INFO - [base] BEGIN (implicit)
+2025-08-15 17:01:13,919 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.telegram_id = $1::BIGINT
+2025-08-15 17:01:13,920 - INFO - [base] [generated in 0.00060s] (1758719447,)
+2025-08-15 17:01:13,923 - INFO - [base] INSERT INTO users (telegram_id, username, promo_code, invited_by_id, created_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::BIGINT, $5::TIMESTAMP WITHOUT TIME ZONE) RETURNING users.id
+2025-08-15 17:01:13,923 - INFO - [base] [generated in 0.00053s] (1758719447, 'reddmon1', 'reddmon1', None, datetime.datetime(2025, 8, 15, 14, 1, 13, 923250))
+2025-08-15 17:01:13,927 - INFO - [base] COMMIT
+2025-08-15 17:01:14,986 - INFO - [dispatcher] Update id=433007876 is handled. Duration 1078 ms by bot id=7524145939
+2025-08-15 17:01:18,395 - INFO - [handlers] Обработка invite_friend для пользователя 1758719447
+2025-08-15 17:01:18,396 - INFO - [base] BEGIN (implicit)
+2025-08-15 17:01:18,397 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.telegram_id = $1::BIGINT
+2025-08-15 17:01:18,397 - INFO - [base] [cached since 4.478s ago] (1758719447,)
+2025-08-15 17:01:18,401 - INFO - [base] SELECT bonus_history.user_id AS bonus_history_user_id, bonus_history.id AS bonus_history_id, bonus_history.amount AS bonus_history_amount, bonus_history.operation AS bonus_history_operation, bonus_history.description AS bonus_history_description, bonus_history.date AS bonus_history_date, bonus_history.status AS bonus_history_status 
+FROM bonus_history 
+WHERE bonus_history.user_id IN ($1::BIGINT)
+2025-08-15 17:01:18,401 - INFO - [base] [generated in 0.00068s] (1,)
+2025-08-15 17:01:18,402 - INFO - [base] COMMIT
+2025-08-15 17:01:19,021 - INFO - [dispatcher] Update id=433007877 is handled. Duration 625 ms by bot id=7524145939
+2025-08-15 17:01:29,108 - INFO - [handlers] Обработка /start с реферальным кодом для пользователя 1758719447
+2025-08-15 17:01:29,108 - INFO - [base] BEGIN (implicit)
+2025-08-15 17:01:29,109 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.telegram_id = $1::BIGINT
+2025-08-15 17:01:29,109 - INFO - [base] [cached since 15.19s ago] (1758719447,)
+2025-08-15 17:01:29,110 - INFO - [base] SELECT bonus_history.user_id AS bonus_history_user_id, bonus_history.id AS bonus_history_id, bonus_history.amount AS bonus_history_amount, bonus_history.operation AS bonus_history_operation, bonus_history.description AS bonus_history_description, bonus_history.date AS bonus_history_date, bonus_history.status AS bonus_history_status 
+FROM bonus_history 
+WHERE bonus_history.user_id IN ($1::BIGINT)
+2025-08-15 17:01:29,111 - INFO - [base] [cached since 10.71s ago] (1,)
+2025-08-15 17:01:29,112 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.promo_code = $1::VARCHAR
+2025-08-15 17:01:29,112 - INFO - [base] [generated in 0.00055s] ('sluvno',)
+2025-08-15 17:01:29,443 - INFO - [base] COMMIT
+2025-08-15 17:01:29,444 - INFO - [dispatcher] Update id=433007878 is handled. Duration 343 ms by bot id=7524145939
+2025-08-15 17:04:27,052 - INFO - [handlers] Обработка /start с реферальным кодом для пользователя 810584539
+2025-08-15 17:04:27,053 - INFO - [base] BEGIN (implicit)
+2025-08-15 17:04:27,053 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.telegram_id = $1::BIGINT
+2025-08-15 17:04:27,054 - INFO - [base] [cached since 193.1s ago] (810584539,)
+2025-08-15 17:04:27,055 - INFO - [base] INSERT INTO users (telegram_id, username, promo_code, invited_by_id, created_at) VALUES ($1::BIGINT, $2::VARCHAR, $3::VARCHAR, $4::BIGINT, $5::TIMESTAMP WITHOUT TIME ZONE) RETURNING users.id
+2025-08-15 17:04:27,055 - INFO - [base] [cached since 193.1s ago] (810584539, 'sluvno', 'sluvno', None, datetime.datetime(2025, 8, 15, 14, 4, 27, 55262))
+2025-08-15 17:04:27,056 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.promo_code = $1::VARCHAR
+2025-08-15 17:04:27,057 - INFO - [base] [cached since 177.9s ago] ('reddmon1',)
+2025-08-15 17:04:27,058 - INFO - [base] SELECT bonus_history.user_id AS bonus_history_user_id, bonus_history.id AS bonus_history_id, bonus_history.amount AS bonus_history_amount, bonus_history.operation AS bonus_history_operation, bonus_history.description AS bonus_history_description, bonus_history.date AS bonus_history_date, bonus_history.status AS bonus_history_status 
+FROM bonus_history 
+WHERE bonus_history.user_id IN ($1::BIGINT)
+2025-08-15 17:04:27,058 - INFO - [base] [cached since 188.7s ago] (1,)
+2025-08-15 17:04:27,382 - INFO - [base] UPDATE users SET invited_by_id=$1::BIGINT WHERE users.id = $2::BIGINT
+2025-08-15 17:04:27,382 - INFO - [base] [generated in 0.00042s] (1, 2)
+2025-08-15 17:04:27,385 - INFO - [base] COMMIT
+2025-08-15 17:04:27,386 - INFO - [dispatcher] Update id=433007879 is handled. Duration 343 ms by bot id=7524145939
+2025-08-15 17:07:43,175 - INFO - [handlers] Обработка check_bonuses для пользователя 1758719447
+2025-08-15 17:07:43,175 - INFO - [base] BEGIN (implicit)
+2025-08-15 17:07:43,176 - INFO - [base] SELECT users.id, users.telegram_id, users.username, users.promo_code, users.invited_by_id, users.created_at 
+FROM users 
+WHERE users.telegram_id = $1::BIGINT
+2025-08-15 17:07:43,176 - INFO - [base] [cached since 389.3s ago] (1758719447,)
+2025-08-15 17:07:43,177 - INFO - [base] SELECT bonus_history.user_id AS bonus_history_user_id, bonus_history.id AS bonus_history_id, bonus_history.amount AS bonus_history_amount, bonus_history.operation AS bonus_history_operation, bonus_history.description AS bonus_history_description, bonus_history.date AS bonus_history_date, bonus_history.status AS bonus_history_status 
+FROM bonus_history 
+WHERE bonus_history.user_id IN ($1::BIGINT)
+2025-08-15 17:07:43,178 - INFO - [base] [cached since 384.8s ago] (1,)
+2025-08-15 17:07:43,180 - INFO - [base] UPDATE bonus_history SET status=$1::VARCHAR WHERE bonus_history.user_id = $2::BIGINT AND bonus_history.status = $3::VARCHAR AND bonus_history.date < $4::TIMESTAMP WITHOUT TIME ZONE
+2025-08-15 17:07:43,180 - INFO - [base] [generated in 0.00052s] ('available', 1, 'pending', datetime.datetime(2025, 8, 1, 14, 7, 43, 179244))
+2025-08-15 17:07:43,183 - INFO - [base] SELECT coalesce(sum(bonus_history.amount), $1::INTEGER) AS coalesce_1 
+FROM bonus_history 
+WHERE bonus_history.user_id = $2::BIGINT AND bonus_history.status = $3::VARCHAR
+2025-08-15 17:07:43,183 - INFO - [base] [generated in 0.00052s] (0, 1, 'available')
+2025-08-15 17:07:43,187 - INFO - [base] SELECT coalesce(sum(bonus_history.amount), $1::INTEGER) AS coalesce_1 
+FROM bonus_history 
+WHERE bonus_history.user_id = $2::BIGINT AND bonus_history.status = $3::VARCHAR
+2025-08-15 17:07:43,187 - INFO - [base] [cached since 0.00482s ago] (0, 1, 'pending')
+2025-08-15 17:07:43,189 - INFO - [base] SELECT coalesce(sum(bonus_history.amount), $1::INTEGER) AS coalesce_1 
+FROM bonus_history 
+WHERE bonus_history.user_id = $2::BIGINT AND bonus_history.amount > $3::BIGINT AND bonus_history.date >= $4::TIMESTAMP WITHOUT TIME ZONE
+2025-08-15 17:07:43,190 - INFO - [base] [generated in 0.00060s] (0, 1, 0, datetime.datetime(2025, 8, 8, 14, 7, 43, 189246))
+2025-08-15 17:07:43,192 - INFO - [base] SELECT coalesce(sum(bonus_history.amount), $1::INTEGER) AS coalesce_1 
+FROM bonus_history 
+WHERE bonus_history.user_id = $2::BIGINT AND bonus_history.amount > $3::BIGINT
+2025-08-15 17:07:43,192 - INFO - [base] [generated in 0.00042s] (0, 1, 0)
+2025-08-15 17:07:43,193 - INFO - [base] COMMIT
+2025-08-15 17:07:43,779 - INFO - [dispatcher] Update id=433007880 is handled. Duration 608 ms by bot id=7524145939
+2025-08-15 17:08:01,837 - INFO - [dispatcher] Polling stopped
+2025-08-15 17:08:01,838 - ERROR - [dispatcher] Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2025-08-15 17:08:01,838 - WARNING - [dispatcher] Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 7524145939)
+2025-08-15 17:08:02,025 - INFO - [dispatcher] Polling stopped for bot @bali_referal_bot id=7524145939 - 'Leoparbonus'
