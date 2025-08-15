@@ -126,7 +126,7 @@ async def check_bonuses_callback(callback: types.CallbackQuery, session: AsyncSe
             f"📊 *Статистика начислений:*\n"
             f"За последнюю неделю: **+{int(weekly):,} IDR**\n"
             f"За всё время: **+{int(total):,} IDR**\n\n"
-            f"_Для выплаты бонусов свяжитесь с администратором._"
+            f"_Получить бонусы 👉@BaliLoveVisa_"
         )
 
         await callback.message.answer(response_text, parse_mode="Markdown")
