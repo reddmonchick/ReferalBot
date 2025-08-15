@@ -169,7 +169,7 @@ class PurchaseAdmin(ModelView, model=Purchase):
     column_labels = {
         'id': 'ID',
         'user': 'Пользователь',
-        'name': 'Название',
+        'name': 'Название покупки',
         'amount': 'Сумма',
         'bonus_amount': 'Сумма бонуса',
         'date': 'Дата',
@@ -177,7 +177,7 @@ class PurchaseAdmin(ModelView, model=Purchase):
     form_excluded_columns = [Purchase.bonus_amount, Purchase.date]
     form_args = {
         'user': {'label': 'Пользователь'},
-        'name': {'label': 'Название'},
+        'name': {'label': 'Название покупки'},
         'amount': {'label': 'Сумма'},
         'discount_applied': {'label': 'Скидка применена'}
     }
