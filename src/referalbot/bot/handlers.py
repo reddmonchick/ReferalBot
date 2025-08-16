@@ -6,6 +6,7 @@ from src.referalbot.database import repository
 from src.referalbot.utils import logger
 from aiogram import Bot
 from src.referalbot.config import TELEGRAM_TOKEN
+import html  # Импортируем модуль для экранирования HTML
 
 router = Router()
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -40,9 +41,9 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
             if inviter and inviter.telegram_id != telegram_id and not user.invited_by_id:
                 user.invited_by_id = inviter.id
                 await message.answer(
-                    f"Добро пожаловать, {username}!\n"
-                    f"Вы получили 5% скидку по коду {ref_code} на все услуги Bali Love Consulting 🎁\n\n"
-                    f"🔑 Ваш промокод:: {user.promo_code}\n\n"
+                    f"Добро пожаловать, {html.escape(username)}!\n"
+                    f"Вы получили 5% скидку по коду {html.escape(ref_code)} на все услуги Bali Love Consulting 🎁\n\n"
+                    f"🔑 Ваш промокод: {html.escape(user.promo_code)}\n\n"
                     f"Просто покажите его при оформлении или введите при обращении — и скидка будет применена автоматически.\n\n"
                     f"Хочешь получить больше бонусов?\n"
                     f"📲 Приглашайте друзей: t.me/bali_referal_bot?start=REF_{user.promo_code}",
@@ -50,11 +51,11 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
                 )
             else:
                 await message.answer(
-                    f"Добро пожаловать в Bali Love, {username}!\n"
-                    f"🎉 Ваш персональный промокод: {user.promo_code}\n\n"
+                    f"Добро пожаловать в Bali Love, {html.escape(username)}!\n"
+                    f"🎉 Ваш персональный промокод: {html.escape(user.promo_code)}\n\n"
                     f"📩 Приглашайте друзей — за каждую их покупку вы получаете 5% от суммы на бонусный счёт. Бонусами можно оплатить любые услуги Bali Love.\n"
                     f"💸 А ваши друзья получат скидку при первом обращении.\n"
-                    f"Реферальный код {ref_code} недействителен или вы уже использовали код.",
+                    f"Реферальный код {html.escape(ref_code)} недействителен или вы уже использовали код.",
                     reply_markup=main_keyboard()
                 )
                 
@@ -73,8 +74,8 @@ async def start(message: types.Message, session: AsyncSession):
             user = await repository.get_or_create_user(session, telegram_id, username)
                 
         await message.answer(
-            f"Добро пожаловать в Bali Love, {username}!\n"
-            f"🎉 Ваш персональный промокод: {user.promo_code}\n\n"
+            f"Добро пожаловать в Bali Love, {html.escape(username)}!\n"
+            f"🎉 Ваш персональный промокод: {html.escape(user.promo_code)}\n\n"
             f"📩 Приглашайте друзей — за каждую их покупку вы получаете 5% от суммы на бонусный счёт. Бонусами можно оплатить любые услуги Bali Love.\n"
             f"💸 А ваши друзья получат скидку при первом обращении.",
             reply_markup=main_keyboard()
@@ -93,9 +94,10 @@ async def help_command_callback(callback: types.CallbackQuery):
             "Приглашай друзей и получай бонусы за их приобретения в нашем агентстве в размере 5% от стоимости покупки🔥\n"
             "Скидку на наши услуги в размере 5% получит так же приглашенный вами друг 😉\n\n"
             "1 бонус = 1 IDR\n\n"
-            "_Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет_\n\n"
-            "_Оформить визу 👉 @BaliLoveVisa_\n"
-            "_Получить вознаграждение 👉 @BaliLove_Johny_\n"
+            "<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
+            "<i>Оформить визу 👉 @BaliLoveVisa</i>\n"
+            "<i>Получить вознаграждение 👉 @BaliLove_Johny</i>\n", 
+            parse_mode="HTML"
         )
         await callback.answer()
     except Exception as e:
@@ -122,19 +124,19 @@ async def check_bonuses_callback(callback: types.CallbackQuery, session: AsyncSe
         total = balance_data['total_earned']
 
         response_text = (
-            f"💳 *Ваш бонусный баланс:*\n\n"
-            f"✅ Доступно к списанию: **{int(available):,} IDR**\n"
-            f"⏳ Ожидают начисления: **{int(pending):,} IDR**\n\n"
-            f"📊 *Статистика начислений:*\n"
-            f"За последнюю неделю: **+{int(weekly):,} IDR**\n"
-            f"За всё время: **+{int(total):,} IDR**\n\n"
+            f"💳 <b>Ваш бонусный баланс:</b>\n\n"
+            f"✅ Доступно к списанию: <b>{int(available):,} IDR</b>\n"
+            f"⏳ Ожидают начисления: <b>{int(pending):,} IDR</b>\n\n"
+            f"📊 <b>Статистика начислений:</b>\n"
+            f"За последнюю неделю: <b>+{int(weekly):,} IDR</b>\n"
+            f"За всё время: <b>+{int(total):,} IDR</b>\n\n"
             f"1 бонус = 1 IDR\n\n"
-            f"_Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет_\n\n"
-            f"_Оформить визу 👉 @BaliLoveVisa_\n"
-            f"_Получить вознаграждение 👉 @BaliLove_Johny_"
+            f"<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
+            f"<i>Оформить визу 👉 @BaliLoveVisa</i>\n"
+            f"<i>Получить вознаграждение 👉 @BaliLove_Johny</i>"
         )
 
-        await callback.message.answer(response_text, parse_mode="Markdown")
+        await callback.message.answer(response_text, parse_mode="HTML")
         await callback.answer()
 
     except Exception as e:
@@ -160,16 +162,23 @@ async def bonus_history_callback(callback: types.CallbackQuery, session: AsyncSe
             await callback.answer()
             return
 
-        response_lines = ["📜 **Последние 15 операций:**\n"]
+        response_lines = ["📜 <b>Последние 15 операций:</b>"]
         for entry in history:
             sign = "+" if entry.amount > 0 else ""
             amount_formatted = f"{entry.amount:,}"
             date_formatted = entry.date.strftime('%d.%m.%Y')
-
-            line = f"`{date_formatted}`: **{sign}{amount_formatted} IDR**\n_{entry.operation} ({entry.description})_"
+            
+            # Экранируем текстовые поля
+            operation_escaped = html.escape(entry.operation)
+            description_escaped = html.escape(entry.description)
+            
+            line = (
+                f"<code>{date_formatted}</code>: <b>{sign}{amount_formatted} IDR</b>\n"
+                f"<i>{operation_escaped} ({description_escaped})</i>"
+            )
             response_lines.append(line)
 
-        await callback.message.answer("\n\n".join(response_lines), parse_mode="Markdown")
+        await callback.message.answer("\n\n".join(response_lines), parse_mode="HTML")
         await callback.answer()
 
     except Exception as e:
@@ -187,13 +196,18 @@ async def invite_friend_callback(callback: types.CallbackQuery, session: AsyncSe
             await callback.message.answer("Сначала используйте /start.")
             await callback.answer()
             return
+        
+        # Экранируем промокод для текстовой части
+        promo_escaped = html.escape(user.promo_code)
+        
         await callback.message.answer(
             f"Приглашайте друзей и зарабатывайте вместе с нами🩷: \n\n"
             f"Отправь эту ссылку другу: t.me/bali_referal_bot?start=REF_{user.promo_code}\n\n"
-            f"После того как он воспользуется нашими услугами по вашему промокоду: ({user.promo_code}) вам будет начислено 5% от стоимости его покупки, а друг получит скидку в размере 5% на наши услуги🔥\n\n"
-            f"_Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет_\n\n"
-            f"_Оформить визу 👉 @BaliLoveVisa_\n"
-            f"_Получить вознаграждение 👉 @BaliLove_Johny_"
+            f"После того как он воспользуется нашими услугами по вашему промокоду: ({promo_escaped}) вам будет начислено 5% от стоимости его покупки, а друг получит скидку в размере 5% на наши услуги🔥\n\n"
+            f"<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
+            f"<i>Оформить визу 👉 @BaliLoveVisa</i>\n"
+            f"<i>Получить вознаграждение 👉 @BaliLove_Johny</i>",
+            parse_mode="HTML"
         )
         await callback.answer()
     except Exception as e:
