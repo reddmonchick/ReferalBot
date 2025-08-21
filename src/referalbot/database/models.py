@@ -16,6 +16,8 @@ class User(Base):
     promo_code = Column(String, unique=True)
     invited_by_id = Column(BigInteger, ForeignKey('users.id'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    turnover = Column(BigInteger, default=0, nullable=False)
+    level = Column(String, default='Bronze', nullable=False)
     
     invited_by = relationship('User', remote_side=[id], back_populates='referrals')
     referrals = relationship('User', back_populates='invited_by', foreign_keys=[invited_by_id])
@@ -79,8 +81,10 @@ class BonusHistory(Base):
     description = Column(String)
     date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default='pending', nullable=False)
-    
+    purchase_id = Column(BigInteger, ForeignKey('purchases.id'), nullable=True)
+
     user = relationship('User', back_populates='bonus_history')
+    purchase = relationship('Purchase')
 
     def __str__(self) -> str:
         return f"Операция #{self.id} (user_id={self.user_id})"

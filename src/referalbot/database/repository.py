@@ -2,14 +2,63 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, update
 from datetime import datetime, timedelta
 
-from src.referalbot.database.models import User, BonusHistory
+from src.referalbot.database.models import User, BonusHistory, Purchase
 from src.referalbot.bot.utils import generate_promo_code
+
+LEVELS = {
+    "Bronze": {"threshold": 0, "rate": 0.05},
+    "Silver": {"threshold": 50_000_000, "rate": 0.07},
+    "Gold": {"threshold": 80_000_000, "rate": 0.10},
+    "Platinum": {"threshold": 200_000_000, "rate": 0.20},
+}
+
+def get_level_by_turnover(turnover: int) -> dict:
+    """Determines a user's level based on their turnover."""
+    if turnover >= LEVELS["Platinum"]["threshold"]:
+        return {"level": "Platinum", "rate": LEVELS["Platinum"]["rate"]}
+    if turnover >= LEVELS["Gold"]["threshold"]:
+        return {"level": "Gold", "rate": LEVELS["Gold"]["rate"]}
+    if turnover >= LEVELS["Silver"]["threshold"]:
+        return {"level": "Silver", "rate": LEVELS["Silver"]["rate"]}
+    return {"level": "Bronze", "rate": LEVELS["Bronze"]["rate"]}
+
+async def recalculate_and_update_turnover(session: AsyncSession, user_id: int):
+    """
+    Recalculates the total turnover for a user based on confirmed purchases
+    of their referrals and updates the user's level.
+    Turnover is the sum of purchase amounts that resulted in an 'available' bonus.
+    """
+    stmt = (
+        select(func.coalesce(func.sum(Purchase.amount), 0))
+        .join(BonusHistory, BonusHistory.purchase_id == Purchase.id)
+        .where(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.status == 'available',
+                BonusHistory.purchase_id.isnot(None)
+            )
+        )
+    )
+    result = await session.execute(stmt)
+    total_turnover = result.scalar_one()
+
+    level_data = get_level_by_turnover(total_turnover)
+
+    update_stmt = (
+        update(User)
+        .where(User.id == user_id)
+        .values(turnover=total_turnover, level=level_data["level"])
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(update_stmt)
+
+    return {"turnover": total_turnover, "level": level_data["level"]}
 
 
 async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:
     """
     Updates the status of pending bonuses older than 14 days to 'available'.
-    This function commits the changes within its own scope.
+    If any bonuses are updated, it triggers a turnover recalculation for the user.
     """
     fourteen_days_ago = datetime.utcnow() - timedelta(days=14)
     stmt = (
@@ -24,7 +73,10 @@ async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:
         .values(status='available')
         .execution_options(synchronize_session=False)
     )
-    await session.execute(stmt)
+    result = await session.execute(stmt)
+
+    if result.rowcount > 0:
+        await recalculate_and_update_turnover(session, user_id)
 
 async def get_bonus_balance(session: AsyncSession, user_id: int) -> dict:
     """
