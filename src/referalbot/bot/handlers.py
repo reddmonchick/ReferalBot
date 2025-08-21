@@ -13,12 +13,51 @@ bot = Bot(token=TELEGRAM_TOKEN)
 
 def main_keyboard():
     keyboard = [
+        [InlineKeyboardButton(text="👤 Профиль", callback_data="show_profile")],
         [InlineKeyboardButton(text="Проверить бонусы", callback_data="check_bonuses")],
         [InlineKeyboardButton(text="История операций", callback_data="bonus_history")],
         [InlineKeyboardButton(text="Пригласить друга", callback_data="invite_friend")],
         [InlineKeyboardButton(text="Помощь", callback_data="help_info")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+@router.callback_query(F.data == "show_profile")
+async def profile_callback(callback: types.CallbackQuery, session: AsyncSession):
+    logger.info(f"Обработка show_profile для пользователя {callback.from_user.id}")
+    try:
+        async with session.begin():
+            # get_bonus_balance also updates pending bonuses and recalculates turnover
+            balance_data = await repository.get_bonus_balance(session, callback.from_user.id)
+
+            # Re-fetch user to get the latest level and turnover
+            user = await repository.get_user_by_telegram_id(session, callback.from_user.id)
+            if not user:
+                await callback.message.answer("Сначала используйте /start.")
+                await callback.answer()
+                return
+
+        level_name = user.level
+        turnover_formatted = f"{int(user.turnover):,}"
+        balance_formatted = f"{int(balance_data['available_balance']):,}"
+
+        level_data = repository.get_level_by_turnover(user.turnover)
+        bonus_percent = int(level_data["rate"] * 100)
+
+        response_text = (
+            f"👤 <b>Ваш Профиль</b>\n\n"
+            f"🏆 Уровень: <b>{level_name} ({bonus_percent}%)</b>\n"
+            f"📈 Оборот: <b>{turnover_formatted} IDR</b>\n"
+            f"💰 Доступные бонусы: <b>{balance_formatted} IDR</b>\n\n"
+            f"Приглашайте друзей и увеличивайте свой уровень, чтобы получать еще больше бонусов!"
+        )
+
+        await callback.message.answer(response_text, parse_mode="HTML")
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Ошибка в show_profile: {e}")
+        await callback.message.answer("Произошла ошибка при отображении профиля.")
+        await callback.answer()
 
 @router.message(CommandStart(deep_link=True))
 async def start_with_referral(message: types.Message, command, session: AsyncSession):
@@ -53,7 +92,7 @@ async def start_with_referral(message: types.Message, command, session: AsyncSes
                 await message.answer(
                     f"Добро пожаловать в Bali Love, {html.escape(username)}!\n"
                     f"🎉 Ваш персональный промокод: {html.escape(user.promo_code)}\n\n"
-                    f"📩 Приглашайте друзей — за каждую их покупку вы получаете 5% от суммы на бонусный счёт. Бонусами можно оплатить любые услуги Bali Love или получить вознаграждение на банковский счет\n"
+                    f"📩 Приглашайте друзей — за каждую их покупку вы получаете бонус на свой счёт. Ваш процент зависит от вашего уровня и может достигать 20%!\n"
                     f" 1 бонус = 1 IDR\n\n"
                     f"💸 А ваши друзья получат скидку при первом обращении🔥\n\n"
                     f"Оформить визу 👉 @BaliLoveVisa\n"
@@ -79,7 +118,7 @@ async def start(message: types.Message, session: AsyncSession):
         await message.answer(
             f"Добро пожаловать в Bali Love, {html.escape(username)}!\n"
             f"🎉 Ваш персональный промокод: {html.escape(user.promo_code)}\n\n"
-            f"📩 Приглашайте друзей — за каждую их покупку вы получаете 5% от суммы на бонусный счёт. Бонусами можно оплатить любые услуги Bali Love или получить вознаграждение на банковский счет\n"
+            f"📩 Приглашайте друзей — за каждую их покупку вы получаете бонус на свой счёт. Ваш процент зависит от вашего уровня и может достигать 20%!\n"
             f" 1 бонус = 1 IDR\n\n"
             f"💸 А ваши друзья получат скидку при первом обращении🔥\n\n"
             f"Оформить визу 👉 @BaliLoveVisa\n"
@@ -97,7 +136,7 @@ async def help_command_callback(callback: types.CallbackQuery):
     try:
         await callback.message.answer(
             "Добро пожаловать в Bali Love Consulting🩷\n\n"
-            "Приглашай друзей и получай бонусы за их приобретения в нашем агентстве в размере 5% от стоимости покупки🔥\n"
+            "Приглашай друзей и получай бонусы за их приобретения в нашем агентстве. Ваш процент бонуса зависит от вашего уровня и может достигать 20%!\n"
             "Скидку на наши услуги в размере 5% получит так же приглашенный вами друг 😉\n\n"
             "1 бонус = 1 IDR\n\n"
             "<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
@@ -209,7 +248,7 @@ async def invite_friend_callback(callback: types.CallbackQuery, session: AsyncSe
         await callback.message.answer(
             f"Приглашайте друзей и зарабатывайте вместе с нами🩷 \n\n"
             f"Отправь эту ссылку другу: t.me/bali_referal_bot?start=REF_{user.promo_code}\n\n"
-            f"После того как он воспользуется нашими услугами по вашему промокоду: {promo_escaped} вам будет начислено 5% от стоимости его покупки, а друг получит скидку в размере 5% на наши услуги🔥\n\n"
+            f"После того как он воспользуется нашими услугами по вашему промокоду: {promo_escaped} вам будет начислен бонус от стоимости его покупки в зависимости от вашего уровня (до 20%), а друг получит скидку в размере 5% на наши услуги🔥\n\n"
             f"<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
             f"<i>Оформить визу 👉 @BaliLoveVisa</i>\n"
             f"<i>Получить вознаграждение 👉 @BaliLove_Johny</i>",

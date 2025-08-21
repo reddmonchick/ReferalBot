@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from src.referalbot.database.models import User, Purchase, BonusHistory
 from src.referalbot.database.db import async_session
+from src.referalbot.database.repository import get_level_by_turnover
 from pydantic import BaseModel
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -9,7 +11,7 @@ from aiogram import Bot
 from src.referalbot.config import TELEGRAM_TOKEN
 
 router = APIRouter()
-bot = Bot(token=TELEGRAM_TOKEN) # Создаем экземпляр бота для отправки сообщений
+bot = Bot(token=TELEGRAM_TOKEN)
 
 class PurchaseCreate(BaseModel):
     user_id: int
@@ -19,7 +21,7 @@ class PurchaseCreate(BaseModel):
 class PurchaseUpdate(BaseModel):
     bonus_paid: bool
 
-async def log_bonus_history(session, user_id, amount, operation, description):
+async def log_bonus_history(session, user_id, amount, operation, description, purchase_id=None):
     status = 'pending' if amount > 0 else 'available'
 
     history = BonusHistory(
@@ -27,7 +29,8 @@ async def log_bonus_history(session, user_id, amount, operation, description):
         amount=amount,
         operation=operation,
         description=description,
-        status=status
+        status=status,
+        purchase_id=purchase_id
     )
     session.add(history)
     await session.flush()
@@ -111,54 +114,58 @@ async def list_users():
 @router.post("/purchases")
 async def create_purchase(purchase: PurchaseCreate):
     async with async_session() as session:
-        user_result = await session.execute(select(User).filter_by(id=purchase.user_id))
-        user = user_result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        async with session.begin():
+            user_result = await session.execute(select(User).filter_by(id=purchase.user_id))
+            user = user_result.scalar_one_or_none()
+            if not user:
+                raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-        calculated_bonus_amount = 0
-        if user.invited_by_id:
-            calculated_bonus_amount = int(round(purchase.amount * 0.05))
+            calculated_bonus_amount = 0
+            if user.invited_by_id:
+                # Eagerly load the inviter to access their turnover
+                inviter_res = await session.execute(
+                    select(User).options(selectinload(User.referrals)).filter_by(id=user.invited_by_id)
+                )
+                inviter = inviter_res.scalar_one()
 
-        new_purchase = Purchase(
-            user_id=purchase.user_id,
-            amount=purchase.amount,
-            discount_applied=purchase.discount_applied,
-            bonus_amount=calculated_bonus_amount
-        )
+                # Calculate potential new turnover to determine bonus rate
+                potential_turnover = inviter.turnover + purchase.amount
+                level_data = get_level_by_turnover(potential_turnover)
+                bonus_rate = level_data["rate"]
 
-        session.add(new_purchase)
-        await session.commit()
-        await session.refresh(new_purchase)
+                calculated_bonus_amount = int(round(purchase.amount * bonus_rate))
 
-        #log_to_google_sheet(new_purchase, user)
-
-        if user.invited_by_id and calculated_bonus_amount > 0:
-            # Логируем начисление бонуса
-            await log_bonus_history(
-                session,
-                user.invited_by_id,
-                calculated_bonus_amount,
-                "Начисление",
-                f"За покупку от {user.username} (ID: {new_purchase.id})"
+            new_purchase = Purchase(
+                user_id=purchase.user_id,
+                amount=purchase.amount,
+                discount_applied=purchase.discount_applied,
+                bonus_amount=calculated_bonus_amount
             )
+            session.add(new_purchase)
+            await session.flush() # Use flush to get new_purchase.id
 
-            # >> НОВОЕ: Отправляем уведомление о начислении бонуса <<
-            inviter_result = await session.execute(select(User).filter_by(id=user.invited_by_id))
-            inviter = inviter_result.scalar_one_or_none()
-            if inviter and inviter.telegram_id:
-                try:
-                    await bot.send_message(
-                        chat_id=inviter.telegram_id,
-                        text=f"🎉 Вам начислен бонус: +{calculated_bonus_amount:,} IDR за покупку вашего реферала {user.username}."
-                    )
-                except Exception as e:
-                    print(f"Не удалось отправить уведомление пользователю {inviter.telegram_id}: {e}")
+            if user.invited_by_id and calculated_bonus_amount > 0:
+                await log_bonus_history(
+                    session,
+                    user.invited_by_id,
+                    calculated_bonus_amount,
+                    "Начисление",
+                    f"За покупку от {user.username} (ID: {new_purchase.id})",
+                    purchase_id=new_purchase.id  # Pass the new purchase ID
+                )
+
+                # Send notification to inviter
+                if inviter and inviter.telegram_id:
+                    try:
+                        await bot.send_message(
+                            chat_id=inviter.telegram_id,
+                            text=f"🎉 Вам начислен бонус: +{calculated_bonus_amount:,} IDR за покупку вашего реферала {user.username}. Бонус станет доступен через 14 дней."
+                        )
+                    except Exception as e:
+                        print(f"Не удалось отправить уведомление пользователю {inviter.telegram_id}: {e}")
             
             await session.commit()
-
-
-        return {"message": "Покупка создана", "purchase_id": new_purchase.id, "bonus_amount": new_purchase.bonus_amount}
+            return {"message": "Покупка создана", "purchase_id": new_purchase.id, "bonus_amount": new_purchase.bonus_amount}
     
 @router.patch("/purchases/{purchase_id}")
 async def update_purchase(purchase_id: int, update: PurchaseUpdate):
