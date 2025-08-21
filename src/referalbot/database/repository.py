@@ -5,60 +5,91 @@ from datetime import datetime, timedelta
 from src.referalbot.database.models import User, BonusHistory, Purchase
 from src.referalbot.bot.utils import generate_promo_code
 
+# --- New Level System Logic ---
+
 LEVELS = {
     "Bronze": {"threshold": 0, "rate": 0.05},
     "Silver": {"threshold": 50_000_000, "rate": 0.07},
     "Gold": {"threshold": 80_000_000, "rate": 0.10},
     "Platinum": {"threshold": 200_000_000, "rate": 0.20},
 }
+LEVEL_ORDER = ["Bronze", "Silver", "Gold", "Platinum"]
 
 def get_level_by_turnover(turnover: int) -> dict:
-    """Determines a user's level based on their turnover."""
+    """Determines a user's potential level based on a given turnover amount."""
+    level_name = "Bronze"
     if turnover >= LEVELS["Platinum"]["threshold"]:
-        return {"level": "Platinum", "rate": LEVELS["Platinum"]["rate"]}
-    if turnover >= LEVELS["Gold"]["threshold"]:
-        return {"level": "Gold", "rate": LEVELS["Gold"]["rate"]}
-    if turnover >= LEVELS["Silver"]["threshold"]:
-        return {"level": "Silver", "rate": LEVELS["Silver"]["rate"]}
-    return {"level": "Bronze", "rate": LEVELS["Bronze"]["rate"]}
+        level_name = "Platinum"
+    elif turnover >= LEVELS["Gold"]["threshold"]:
+        level_name = "Gold"
+    elif turnover >= LEVELS["Silver"]["threshold"]:
+        level_name = "Silver"
+    return {"level": level_name, "rate": LEVELS[level_name]["rate"]}
 
-async def recalculate_and_update_turnover(session: AsyncSession, user_id: int):
+async def get_current_month_turnover(session: AsyncSession, user_id: int) -> int:
     """
-    Recalculates the total turnover for a user based on confirmed purchases
-    of their referrals and updates the user's level.
-    Turnover is the sum of purchase amounts that resulted in an 'available' bonus.
+    Calculates referral turnover for the current calendar month on the fly.
+    Turnover is the sum of purchase amounts that have an 'available' bonus status.
     """
-    stmt = (
+    today = datetime.utcnow()
+    start_of_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    turnover_res = await session.execute(
         select(func.coalesce(func.sum(Purchase.amount), 0))
-        .join(BonusHistory, BonusHistory.purchase_id == Purchase.id)
+        .join(BonusHistory, Purchase.id == BonusHistory.purchase_id)
         .where(
             and_(
                 BonusHistory.user_id == user_id,
                 BonusHistory.status == 'available',
-                BonusHistory.purchase_id.isnot(None)
+                Purchase.date >= start_of_month
             )
         )
     )
-    result = await session.execute(stmt)
-    total_turnover = result.scalar_one()
+    return turnover_res.scalar_one()
 
-    level_data = get_level_by_turnover(total_turnover)
-
-    update_stmt = (
-        update(User)
-        .where(User.id == user_id)
-        .values(turnover=total_turnover, level=level_data["level"])
-        .execution_options(synchronize_session=False)
+async def update_lifetime_turnover(session: AsyncSession, user_id: int) -> None:
+    """Calculates and updates the total lifetime turnover for a user."""
+    turnover_res = await session.execute(
+        select(func.coalesce(func.sum(Purchase.amount), 0))
+        .join(BonusHistory, Purchase.id == BonusHistory.purchase_id)
+        .where(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.status == 'available'
+            )
+        )
     )
-    await session.execute(update_stmt)
+    total_turnover = turnover_res.scalar_one()
 
-    return {"turnover": total_turnover, "level": level_data["level"]}
+    await session.execute(
+        update(User).where(User.id == user_id).values(turnover=total_turnover)
+    )
 
+async def update_user_level_if_needed(session: AsyncSession, user: User) -> None:
+    """Checks if the user's permanent level should be upgraded and updates it."""
+    monthly_turnover = await get_current_month_turnover(session, user.id)
+    potential_level_data = get_level_by_turnover(monthly_turnover)
+    potential_level = potential_level_data["level"]
+
+    try:
+        current_level_index = LEVEL_ORDER.index(user.level)
+        potential_level_index = LEVEL_ORDER.index(potential_level)
+
+        if potential_level_index > current_level_index:
+            user.level = potential_level
+            session.add(user)
+            await session.flush([user])
+    except ValueError:
+        # Handle cases where a level name might not be in the list
+        pass
+
+from sqlalchemy.orm import selectinload
 
 async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:
     """
     Updates the status of pending bonuses older than 14 days to 'available'.
-    If any bonuses are updated, it triggers a turnover recalculation for the user.
+    This function also triggers updates to the user's lifetime turnover and
+    checks for a level-up based on monthly turnover.
     """
     fourteen_days_ago = datetime.utcnow() - timedelta(days=14)
     stmt = (
@@ -76,7 +107,13 @@ async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:
     result = await session.execute(stmt)
 
     if result.rowcount > 0:
-        await recalculate_and_update_turnover(session, user_id)
+        # If bonuses were matured, update the user's state
+        user = await session.get(User, user_id)
+        if user:
+            # We must update lifetime turnover first
+            await update_lifetime_turnover(session, user.id)
+            # Then check for a level up with the new monthly turnover data
+            await update_user_level_if_needed(session, user)
 
 async def get_bonus_balance(session: AsyncSession, user_id: int) -> dict:
     """
@@ -171,6 +208,20 @@ async def get_user_by_promo_code(session: AsyncSession, promo_code: str) -> User
     """
     result = await session.execute(select(User).filter_by(promo_code=promo_code))
     return result.scalar_one_or_none()
+
+async def log_bonus_history(session: AsyncSession, user_id: int, amount: int, operation: str, description: str, purchase_id: int = None, make_available: bool = False):
+    """Logs a bonus transaction in the history."""
+    status = 'available' if make_available or amount <= 0 else 'pending'
+    history = BonusHistory(
+        user_id=user_id,
+        amount=amount,
+        operation=operation,
+        description=description,
+        status=status,
+        purchase_id=purchase_id
+    )
+    session.add(history)
+    await session.flush([history])
 
 async def get_bonus_history(session: AsyncSession, user_id: int, limit: int = 15) -> list[BonusHistory]:
     """

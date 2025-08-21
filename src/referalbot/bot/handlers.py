@@ -3,6 +3,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.referalbot.database import repository
+from src.referalbot.database.repository import LEVELS
 from src.referalbot.utils import logger
 from aiogram import Bot
 from src.referalbot.config import TELEGRAM_TOKEN
@@ -40,8 +41,7 @@ async def profile_callback(callback: types.CallbackQuery, session: AsyncSession)
         turnover_formatted = f"{int(user.turnover):,}"
         balance_formatted = f"{int(balance_data['available_balance']):,}"
 
-        level_data = repository.get_level_by_turnover(user.turnover)
-        bonus_percent = int(level_data["rate"] * 100)
+        bonus_percent = int(LEVELS.get(user.level, {}).get("rate", 0.05) * 100)
 
         response_text = (
             f"👤 <b>Ваш Профиль</b>\n\n"
