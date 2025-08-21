@@ -6,10 +6,11 @@ from starlette.responses import RedirectResponse
 from sqladmin import Admin, ModelView
 from sqladmin import action
 from sqlalchemy import select, func
-from src.referalbot.api.routes import router, log_to_google_sheet, log_bonus_history
+from src.referalbot.api.routes import router, log_to_google_sheet
 from src.referalbot.database.db import async_session, init_db, engine
 from src.referalbot.database.models import User, Purchase, BonusHistory
 from src.referalbot.database import repository
+from src.referalbot.database.repository import LEVELS, update_lifetime_turnover, update_user_level_if_needed, log_bonus_history
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
@@ -243,9 +244,11 @@ class PurchaseAdmin(ModelView, model=Purchase):
             model.date = datetime.datetime.utcnow()
             # data может не содержать все поля, которые мы установили в on_model_change
             # Поэтому копируем их из модели
-            for name, value in data.items():
-                if name != "save_action": # Исключаем служебное поле
-                    setattr(model, name, value)
+            model.user_id = data.get("user")
+            model.name = data.get("name")
+            model.amount = data.get("amount")
+            model.discount_applied = data.get("discount_applied")
+            model.bonus_paid = data.get("bonus_paid") == "on"
                     
             # --- ОТЛАДКА ---
             print("Модель перед сохранением:", model.__dict__)
@@ -302,55 +305,74 @@ class PurchaseAdmin(ModelView, model=Purchase):
 
 # Обновите after_model_change, чтобы он не пытался обрабатывать form_data снова
     async def after_model_change(self, data: dict, model: Purchase, is_created: bool, request: Request) -> None:
-        print("after_model_change вызван. is_created:", is_created, "model.id:", model.id if model else None)
-    
-    # Эта логика теперь вызывается из нашего кастомного create
-    # и не должна больше пытаться анализировать request.form()
-    
         if not is_created or not model or model.bonus_amount <= 0:
-            # --- ОТЛАДКА ---
-            print("after_model_change: Условия не выполнены (is_created, model, bonus_amount). Выход.")
             return
-            
-        # --- Логика начисления бонусов ---
+
         async with async_session() as session:
-            # Загружаем Purchase с пользователем и его пригласившим
-            purchase_db = await session.get(Purchase, model.id, options=[selectinload(Purchase.user).selectinload(User.invited_by)])
-            if not (purchase_db and purchase_db.user and purchase_db.user.invited_by):
-                # --- ОТЛАДКА ---
-                print("after_model_change: Пользователь или пригласивший не найдены.")
-                return # Нет пригласившего, бонус не начисляем
+            async with session.begin():
+                # Re-fetch the purchase with relationships to be safe
+                purchase_db = await session.get(Purchase, model.id, options=[selectinload(Purchase.user).selectinload(User.invited_by)])
+                if not (purchase_db and purchase_db.user and purchase_db.user.invited_by):
+                    return
                 
-            inviter = purchase_db.user.invited_by
-            user = purchase_db.user
-            
-            # Логируем бонус в истории
-            await log_bonus_history(
-                session, inviter.id, model.bonus_amount,
-                "Начисление", f"За покупку от {user.username}"
-            )
-            
-            # Отправляем уведомление в Telegram
-            if inviter.telegram_id:
-                try:
-                    await bot.send_message(
-                        chat_id=inviter.telegram_id,
-                        text=f"🎉 Вам начислен бонус: +{model.bonus_amount:,} IDR"
+                inviter = purchase_db.user.invited_by
+                user = purchase_db.user
+
+                # The form sends 'on' for a checked checkbox.
+                # We also need to check the model's bonus_paid status which was set in 'create'
+                bonus_is_paid = data.get("bonus_paid") == "on" or model.bonus_paid
+
+                # Log the bonus, making it available if it was paid
+                await log_bonus_history(
+                    session,
+                    inviter.id,
+                    model.bonus_amount,
+                    "Начисление",
+                    f"За покупку от {user.username}",
+                    purchase_id=model.id,
+                    make_available=bonus_is_paid
+                )
+
+                # If the bonus was made available immediately, update turnover and check for level-up
+                if bonus_is_paid:
+                    await update_lifetime_turnover(session, inviter.id)
+                    await update_user_level_if_needed(session, inviter)
+
+                # Send notification to inviter
+                if inviter.telegram_id:
+                    notification_text = (
+                        f"🎉 Вам начислен бонус: +{model.bonus_amount:,} IDR за покупку вашего реферала {user.username}. "
+                        f"{'Бонус уже доступен!' if bonus_is_paid else 'Бонус станет доступен через 14 дней.'}"
                     )
-                    # --- ОТЛАДКА ---
-                    print(f"Уведомление отправлено пользователю {inviter.telegram_id}")
-                except Exception as e:
-                    print(f"Ошибка отправки уведомления: {e}")
-                    
-            await session.commit()
-            # --- ОТЛАДКА ---
-            print("Бонусы успешно начислены и записаны в БД.")
+                    try:
+                        await bot.send_message(
+                            chat_id=inviter.telegram_id,
+                            text=notification_text
+                        )
+                    except Exception as e:
+                        print(f"Не удалось отправить уведомление пользователю {inviter.telegram_id}: {e}")
     
     async def on_model_change(self, data: dict, model: Purchase, is_created: bool, request: Request) -> None:
+        if not is_created:
+            return
+
         async with async_session() as session:
-            user = await session.get(User, int(data.get("user")))
-            if user and user.invited_by_id:
-                model.bonus_amount = int(round(int(data.get("amount", 0)) * 0.05))
+            user_id = data.get("user")
+            if not user_id:
+                model.bonus_amount = 0
+                return
+
+            user = await session.get(User, int(user_id))
+            if not user or not user.invited_by_id:
+                model.bonus_amount = 0
+                return
+
+            inviter = await session.get(User, user.invited_by_id)
+            if inviter:
+                # Calculate bonus based on the inviter's permanent level
+                bonus_rate = LEVELS.get(inviter.level, {}).get("rate", 0.05)  # Default to Bronze rate
+                amount = int(data.get("amount", 0))
+                model.bonus_amount = int(round(amount * bonus_rate))
             else:
                 model.bonus_amount = 0
 
