@@ -85,6 +85,26 @@ async def update_user_level_if_needed(session: AsyncSession, user: User) -> None
 
 from sqlalchemy.orm import selectinload
 
+async def expire_old_bonuses(session: AsyncSession, user_id: int) -> None:
+    """
+    Updates the status of available bonuses older than 6 months (180 days) to 'expired'.
+    """
+    # Using 180 days as an approximation for 6 months
+    six_months_ago = datetime.utcnow() - timedelta(days=180)
+    stmt = (
+        update(BonusHistory)
+        .where(
+            and_(
+                BonusHistory.user_id == user_id,
+                BonusHistory.status == 'available',
+                BonusHistory.date < six_months_ago
+            )
+        )
+        .values(status='expired')
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(stmt)
+
 async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:
     """
     Updates the status of pending bonuses older than 14 days to 'available'.
@@ -118,9 +138,10 @@ async def update_pending_bonuses(session: AsyncSession, user_id: int) -> None:
 async def get_bonus_balance(session: AsyncSession, user_id: int) -> dict:
     """
     Calculates available, pending, and statistical bonus balances for a user.
-    It internally updates the status of matured bonuses.
+    It internally updates the status of matured and expired bonuses.
     """
-    # First, update statuses of any matured bonuses
+    # First, update statuses of any matured or expired bonuses
+    await expire_old_bonuses(session, user_id)
     await update_pending_bonuses(session, user_id)
 
     # 1. Calculate available balance
