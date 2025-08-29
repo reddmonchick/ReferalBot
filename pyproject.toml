@@ -22,7 +22,8 @@ dependencies = [
     "itsdangerous (>=2.2.0,<3.0.0)",
     "alembic (>=1.16.4,<2.0.0)",
     "environs (>=14.3.0,<15.0.0)",
-    "sqlalchemy-utils (>=0.41.2,<0.42.0)"
+    "sqlalchemy-utils (>=0.41.2,<0.42.0)",
+    "aiosqlite (>=0.20.0,<0.21.0)"
 ]
 
 [tool.poetry]
