@@ -31,8 +31,6 @@ COPY . /app
 COPY crontab /etc/cron.d/monthly-task
 # Give execution rights on the crontab file
 RUN chmod 0644 /etc/cron.d/monthly-task
-# Apply the crontab
-RUN crontab /etc/cron.d/monthly-task
 
 # Create a log file to be able to run tail
 RUN touch /var/log/cron.log
