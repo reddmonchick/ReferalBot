@@ -16,7 +16,6 @@ class User(Base):
     promo_code = Column(String, unique=True)
     invited_by_id = Column(BigInteger, ForeignKey('users.id'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    turnover = Column(BigInteger, default=0, nullable=False)
     level = Column(String, default='Bronze', nullable=False)
     
     invited_by = relationship('User', remote_side=[id], back_populates='referrals')
