@@ -8,6 +8,7 @@ from src.referalbot.utils import logger
 from aiogram import Bot
 from src.referalbot.config import TELEGRAM_TOKEN
 import html
+import asyncio
 
 router = Router()
 bot = Bot(token=TELEGRAM_TOKEN)
