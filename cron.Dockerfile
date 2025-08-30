@@ -4,11 +4,12 @@
 FROM python:3.12-slim as base
 
 # Set up poetry
+# Set up poetry
 ENV POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=1 \
     POETRY_VIRTUALENVS_CREATE=1 \
     POETRY_HOME="/opt/poetry" \
-    POETRY_VERSION=1.8.2
+    POETRY_VERSION=2.1.3
 ENV PATH="$POETRY_HOME/bin:$PATH"
 RUN apt-get update && apt-get install -y curl && \
     curl -sSL https://install.python-poetry.org | python -
@@ -16,7 +17,8 @@ RUN apt-get update && apt-get install -y curl && \
 # Copy project files and install dependencies
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
-RUN poetry install --no-root --no-dev
+RUN poetry lock
+RUN poetry install --no-root --only=main
 
 # Final stage for the cron container
 FROM base as cron-runner
