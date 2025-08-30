@@ -2,6 +2,7 @@ from logging.config import fileConfig
 from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 import asyncio
+import os
 from environs import Env
 
 # Добавьте импорт вашего Base и моделей
@@ -19,7 +20,9 @@ def get_url_from_env() -> str:
     This ensures alembic uses the same configuration source as the app.
     """
     env = Env()
-    env.read_env()
+    # Load env variables from .env.docker in the project root for consistency
+    env.read_env(path=".env.docker")
+
     # For local runs, you might want to switch DB_HOST to localhost in your .env file
     return (
         f"postgresql+asyncpg://{env.str('DB_USER')}:{env.str('DB_PASSWORD')}"

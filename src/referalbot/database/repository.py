@@ -162,3 +162,27 @@ async def get_bonus_history(session: AsyncSession, user_id: int, limit: int = 15
         .limit(limit)
     )
     return history_result.scalars().all()
+
+async def get_current_month_turnover(session: AsyncSession, user_id: int) -> int:
+    """
+    Calculates referral turnover for the current calendar month on the fly.
+    """
+    today = datetime.utcnow()
+    start_of_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    referrals_res = await session.execute(select(User.id).filter(User.invited_by_id == user_id))
+    referral_ids = referrals_res.scalars().all()
+
+    if not referral_ids:
+        return 0
+
+    turnover_res = await session.execute(
+        select(func.coalesce(func.sum(Purchase.amount), 0))
+        .where(
+            and_(
+                Purchase.user_id.in_(referral_ids),
+                Purchase.date >= start_of_month
+            )
+        )
+    )
+    return turnover_res.scalar_one()
