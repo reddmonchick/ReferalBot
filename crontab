@@ -2,6 +2,6 @@
 # The `>> /proc/1/fd/1 2>> /proc/1/fd/2` part ensures that the cron job's output
 # is redirected to the Docker container's stdout and stderr, so it can be
 # viewed with `docker-compose logs`.
-0 2 1 * * poetry run python /app/src/referalbot/tasks.py >> /proc/1/fd/1 2>> /proc/1/fd/2
+0 2 1 * * root poetry run python /app/src/referalbot/tasks.py >> /proc/1/fd/1 2>> /proc/1/fd/2
 
 # An empty line is required at the end of a crontab file
