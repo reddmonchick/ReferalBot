@@ -51,6 +51,31 @@ services:
         max-file: "3"
         tag: "parser-api"
 
+  cron-scheduler:
+    build:
+      context: .
+      dockerfile: cron.Dockerfile
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${DB_PATH}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_SYSTEM=postgresql
+      - DB_DRIVER=asyncpg
+      - DATABASE_URL=${DATABASE_URL}
+    env_file: .env.docker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "cron-scheduler"
+
   db:
     image: postgres:15-alpine
     environment:
