@@ -50,13 +50,13 @@ async def profile_callback(callback: types.CallbackQuery, session: AsyncSession)
         pending_formatted = f"{int(pending_balance):,}"
 
         # Building the response text
-        profile_header = f"👤 **Ваш Профиль**\n\n"
-        level_info = f"🏆 Уровень: **{level_name} ({bonus_percent}%)**\n"
-        turnover_info = f"📈 Оборот за текущий месяц: **{turnover_formatted} IDR**\n\n"
+        profile_header = f"👤 <b>Ваш Профиль</b>\n\n"
+        level_info = f"🏆 Уровень: <b>{level_name} ({bonus_percent}%)</b>\n"
+        turnover_info = f"📈 Оборот за текущий месяц: <b>{turnover_formatted} IDR</b>\n\n"
 
         balance_info = (
-            f"💰 Баланс: **{available_formatted} IDR**\n"
-            f"⏳ Ожидает начисления: **{pending_formatted} IDR**\n"
+            f"💰 Баланс: <b>{available_formatted} IDR</b>\n"
+            f"⏳ Ожидает начисления: <b>{pending_formatted} IDR</b>\n"
         )
 
         separator = "─" * 20 + "\n\n"
