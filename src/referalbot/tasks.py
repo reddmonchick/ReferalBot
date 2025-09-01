@@ -21,7 +21,8 @@ async def get_turnover_for_period(session, user_id: int, start_date: datetime, e
             and_(
                 Purchase.user_id.in_(referral_ids),
                 Purchase.date >= start_date,
-                Purchase.date < end_date
+                Purchase.date < end_date,
+                Purchase.status == 'active'
             )
         )
     )

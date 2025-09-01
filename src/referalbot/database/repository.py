@@ -184,7 +184,8 @@ async def get_current_month_turnover(session: AsyncSession, user_id: int) -> int
         .where(
             and_(
                 Purchase.user_id.in_(referral_ids),
-                Purchase.date >= start_of_month
+                Purchase.date >= start_of_month,
+                Purchase.status == 'active'
             )
         )
     )
