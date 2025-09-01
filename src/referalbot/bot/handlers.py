@@ -22,6 +22,44 @@ def main_keyboard():
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def back_keyboard():
+    keyboard = [
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_welcome_text(username, promo_code):
+    return (
+        f"Добро пожаловать в Bali Love, {html.escape(username)}!\n"
+        f"🎉 Ваш персональный промокод: {html.escape(promo_code)}\n\n"
+        f"📩 Приглашайте друзей — за каждую их покупку вы получаете бонус от суммы на бонусный счёт. Ваш процент зависит от вашего уровня!\n"
+        f" 1 бонус = 1 IDR\n\n"
+        f"💸 А ваши друзья получат скидку при первом обращении🔥\n\n"
+        f"Оформить визу 👉 @BaliLoveVisa\n"
+        f"Получить вознаграждение 👉 @BaliLove_Johny"
+    )
+
+@router.callback_query(F.data == "back_to_main_menu")
+async def back_to_main_menu_callback(callback: types.CallbackQuery, session: AsyncSession):
+    logger.info(f"Обработка back_to_main_menu для пользователя {callback.from_user.id}")
+    try:
+        user = await repository.get_user_by_telegram_id(session, callback.from_user.id)
+        if not user:
+            await callback.message.edit_text("Сначала используйте /start.")
+            await callback.answer()
+            return
+
+        await callback.message.edit_text(
+            get_welcome_text(user.username, user.promo_code),
+            reply_markup=main_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Ошибка в back_to_main_menu: {e}")
+        await callback.message.answer("Произошла ошибка.")
+        await callback.answer()
+
+
 @router.callback_query(F.data == "show_profile")
 async def profile_callback(callback: types.CallbackQuery, session: AsyncSession):
     logger.info(f"Обработка show_profile для пользователя {callback.from_user.id}")
@@ -86,12 +124,12 @@ async def profile_callback(callback: types.CallbackQuery, session: AsyncSession)
             separator + explanation_header + levels_explanation + footer
         )
 
-        await callback.message.answer(response_text, parse_mode="HTML")
+        await callback.message.edit_text(response_text, parse_mode="HTML", reply_markup=back_keyboard())
         await callback.answer()
 
     except Exception as e:
         logger.error(f"Ошибка в show_profile: {e}")
-        await callback.message.answer("Произошла ошибка при отображении профиля.")
+        await callback.message.edit_text("Произошла ошибка при отображении профиля.", reply_markup=back_keyboard())
         await callback.answer()
 
 # --- The rest of the handlers remain the same as the original file ---
@@ -153,13 +191,7 @@ async def start(message: types.Message, session: AsyncSession):
             user = await repository.get_or_create_user(session, telegram_id, username)
                 
         await message.answer(
-            f"Добро пожаловать в Bali Love, {html.escape(username)}!\n"
-            f"🎉 Ваш персональный промокод: {html.escape(user.promo_code)}\n\n"
-            f"📩 Приглашайте друзей — за каждую их покупку вы получаете бонус от суммы на бонусный счёт. Ваш процент зависит от вашего уровня!\n"
-            f" 1 бонус = 1 IDR\n\n"
-            f"💸 А ваши друзья получат скидку при первом обращении🔥\n\n"
-            f"Оформить визу 👉 @BaliLoveVisa\n"
-            f"Получить вознаграждение 👉 @BaliLove_Johny",
+            get_welcome_text(user.username, user.promo_code),
             reply_markup=main_keyboard()
         )
     
@@ -171,20 +203,21 @@ async def start(message: types.Message, session: AsyncSession):
 async def help_command_callback(callback: types.CallbackQuery):
     logger.info(f"Обработка help_info для пользователя {callback.from_user.id}")
     try:
-        await callback.message.answer(
+        await callback.message.edit_text(
             "Добро пожаловать в Bali Love Consulting🩷\n\n"
             "Приглашай друзей и получай бонусы за их приобретения в нашем агентстве. Ваш процент бонуса зависит от вашего уровня!\n"
             "Скидку на наши услуги в размере 5% получит так же приглашенный вами друг 😉\n\n"
             "1 бонус = 1 IDR\n\n"
-            "<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
+            "<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет а так же, при желании, потратить их на благотворительность</i>\n\n"
             "<i>Оформить визу 👉 @BaliLoveVisa</i>\n"
             "<i>Получить вознаграждение 👉 @BaliLove_Johny</i>\n", 
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
         )
         await callback.answer()
     except Exception as e:
         logger.error(f"Ошибка в help_info: {e}")
-        await callback.message.answer("Ошибка при обработке /help.")
+        await callback.message.edit_text("Ошибка при обработке /help.", reply_markup=back_keyboard())
         await callback.answer()
 
 @router.callback_query(F.data == "bonus_history")
@@ -200,7 +233,7 @@ async def bonus_history_callback(callback: types.CallbackQuery, session: AsyncSe
         history = await repository.get_bonus_history(session, user.id)
 
         if not history:
-            await callback.message.answer("История операций с бонусами пуста.")
+            await callback.message.edit_text("История операций с бонусами пуста.", reply_markup=back_keyboard())
             await callback.answer()
             return
 
@@ -219,12 +252,12 @@ async def bonus_history_callback(callback: types.CallbackQuery, session: AsyncSe
             )
             response_lines.append(line)
 
-        await callback.message.answer("\n\n".join(response_lines), parse_mode="HTML")
+        await callback.message.edit_text("\n\n".join(response_lines), parse_mode="HTML", reply_markup=back_keyboard())
         await callback.answer()
 
     except Exception as e:
         logger.error(f"Ошибка в bonus_history: {e}")
-        await callback.message.answer("Ошибка при получении истории операций.")
+        await callback.message.edit_text("Ошибка при получении истории операций.", reply_markup=back_keyboard())
         await callback.answer()
 
 @router.callback_query(F.data == "invite_friend")
@@ -239,17 +272,28 @@ async def invite_friend_callback(callback: types.CallbackQuery, session: AsyncSe
         
         promo_escaped = html.escape(user.promo_code)
         
-        await callback.message.answer(
+        await callback.message.edit_text(
             f"Приглашайте друзей и зарабатывайте вместе с нами🩷 \n\n"
             f"Отправь эту ссылку другу: t.me/bali_referal_bot?start=REF_{user.promo_code}\n\n"
             f"После того как он воспользуется нашими услугами по вашему промокоду: {promo_escaped} вам будет начислен бонус от стоимости его покупки в зависимости от вашего уровня, а друг получит скидку в размере 5% на наши услуги🔥\n\n"
-            f"<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет</i>\n\n"
+            f"<i>Вы можете потратить бонусы на наши услуги и получить скидку или получить их наличными на свой банковский счет а так же, при желании, потратить их на благотворительность</i>\n\n"
             f"<i>Оформить визу 👉 @BaliLoveVisa</i>\n"
             f"<i>Получить вознаграждение 👉 @BaliLove_Johny</i>",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
         )
         await callback.answer()
     except Exception as e:
         logger.error(f"Ошибка в invite_friend: {e}")
-        await callback.message.answer("Ошибка при обработке /invite.")
+        await callback.message.edit_text("Ошибка при обработке /invite.", reply_markup=back_keyboard())
         await callback.answer()
+
+@router.message(F.text)
+async def unknown_message_handler(message: types.Message):
+    """
+    Handler for any text message that doesn't match other handlers.
+    """
+    await message.answer(
+        "Я не распознал вашу команду. Пожалуйста, воспользуйтесь меню.",
+        reply_markup=main_keyboard()
+    )

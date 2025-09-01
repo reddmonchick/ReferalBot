@@ -1,8 +1,8 @@
-"""Init
+"""init
 
-Revision ID: d7f67619d254
+Revision ID: 7bae9b98f228
 Revises: 
-Create Date: 2025-08-21 11:51:42.051234
+Create Date: 2025-09-01 21:08:43.752122
 
 """
 from typing import Sequence, Union
@@ -15,7 +15,7 @@ from src.referalbot.database.models import Base
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'd7f67619d254'
+revision: str = '7bae9b98f228'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -47,6 +47,7 @@ def upgrade() -> None:
     sa.Column('bonus_amount', sa.BigInteger(), nullable=False),
     sa.Column('date', sa.DateTime(), nullable=True),
     sa.Column('bonus_paid', sa.Boolean(), nullable=True),
+    sa.Column('status', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

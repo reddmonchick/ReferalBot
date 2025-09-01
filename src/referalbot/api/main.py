@@ -256,7 +256,7 @@ class PurchaseAdmin(ModelView, model=Purchase):
         'bonus_amount': 'Сумма бонуса',
         'date': 'Дата',
     }
-    form_excluded_columns = [Purchase.bonus_amount, Purchase.date, Purchase.discount_applied]
+    form_excluded_columns = [Purchase.bonus_amount, Purchase.date, Purchase.discount_applied, Purchase.bonus_entry, Purchase.status]
     form_args = {
         'user': {'label': 'Пользователь'},
         'name': {'label': 'Название покупки'},
@@ -435,6 +435,35 @@ class PurchaseAdmin(ModelView, model=Purchase):
             await session.commit()
             # --- ОТЛАДКА ---
             print("Бонусы успешно начислены и записаны в БД.")
+
+    async def delete_model(self, request: Request, pk: any) -> None:
+        """
+        Переопределяем стандартное удаление, чтобы очистить "осиротевшие"
+        записи об отмене бонуса перед удалением самой покупки.
+        """
+        async with async_session() as session:
+            async with session.begin():
+                # Находим запись об отмене бонуса по её описанию.
+                # Это единственный способ их связать в текущей логике.
+                description_to_find = f"Отмена за покупку #{pk}"
+                
+                stmt = select(BonusHistory).where(
+                    BonusHistory.description == description_to_find,
+                    BonusHistory.operation == "Отмена бонуса"
+                )
+                result = await session.execute(stmt)
+                cancellation_entry = result.scalar_one_or_none()
+
+                if cancellation_entry:
+                    # Если нашли запись об отмене - удаляем её
+                    print(f"Найдена и удаляется запись об отмене бонуса ID: {cancellation_entry.id}")
+                    await session.delete(cancellation_entry)
+
+            await session.commit()
+
+        # После нашей кастомной логики вызываем оригинальный метод удаления,
+        # который удалит саму Покупку и связанную с ней запись о НАЧИСЛЕНИИ бонуса.
+        await super().delete_model(request, pk)
     
     async def on_model_change(self, data: dict, model: Purchase, is_created: bool, request: Request) -> None:
         if not is_created:
