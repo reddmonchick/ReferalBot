@@ -137,15 +137,18 @@ async def get_user_by_promo_code(session: AsyncSession, promo_code: str) -> User
     result = await session.execute(select(User).filter_by(promo_code=promo_code))
     return result.scalar_one_or_none()
 
-async def log_bonus_history(session: AsyncSession, user_id: int, amount: int, operation: str, description: str, purchase_id: int = None):
+async def log_bonus_history(session: AsyncSession, user_id: int, amount: int, operation: str, description: str, purchase_id: int = None, status: str = None):
     """Logs a bonus transaction in the history."""
-    status = 'pending' if amount > 0 else 'available'
+    final_status = status
+    if final_status is None:
+        final_status = 'pending' if amount > 0 else 'available'
+
     history = BonusHistory(
         user_id=user_id,
         amount=amount,
         operation=operation,
         description=description,
-        status=status,
+        status=final_status,
         purchase_id=purchase_id
     )
     session.add(history)

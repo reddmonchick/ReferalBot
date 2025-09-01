@@ -166,7 +166,92 @@ class PurchaseAdmin(ModelView, model=Purchase):
     name_plural = "Покупки"
     icon = "fa-solid fa-shopping-cart"
     
-    column_list = [Purchase.id, "user", Purchase.name, Purchase.amount, Purchase.bonus_amount, Purchase.date]
+    @action(
+        name="cancel_purchase",
+        label="Отменить покупку",
+        confirmation_message="Вы уверены, что хотите отменить выбранные покупки? Это действие необратимо.",
+        add_in_list=True,
+    )
+    async def cancel_purchase_action(self, request: Request):
+        pks = request.query_params.getlist("pks")
+        if not pks:
+            return JSONResponse({"message": "Покупки не выбраны"}, status_code=400)
+
+        messages = []
+        async with async_session() as session:
+            async with session.begin():
+                for pk in pks:
+                    purchase_id = int(pk)
+
+                    # Загружаем покупку, пользователя, пригласившего и историю бонусов
+                    stmt = select(Purchase).options(
+                        selectinload(Purchase.user).selectinload(User.invited_by),
+                        selectinload(Purchase.bonus_history)
+                    ).where(Purchase.id == purchase_id)
+
+                    purchase = (await session.execute(stmt)).scalar_one_or_none()
+
+                    if not purchase:
+                        messages.append(f"❌ Покупка ID {purchase_id} не найдена.")
+                        continue
+
+                    if purchase.status == 'canceled':
+                        messages.append(f"ℹ️ Покупка ID {purchase_id} уже была отменена.")
+                        continue
+
+                    # 1. Меняем статус покупки
+                    purchase.status = 'canceled'
+                    messages.append(f"✅ Покупка ID {purchase_id} отменена.")
+
+                    # 2. Обрабатываем бонус
+                    inviter = purchase.user.invited_by if purchase.user else None
+                    if not inviter:
+                        continue # Если нет пригласившего, то и бонусов не было
+
+                    # Ищем бонус, связанный с этой покупкой
+                    bonus_entry = await session.execute(
+                        select(BonusHistory).where(BonusHistory.purchase_id == purchase.id)
+                    )
+                    bonus_entry = bonus_entry.scalar_one_or_none()
+
+                    if bonus_entry:
+                        if bonus_entry.status == 'pending':
+                            await session.delete(bonus_entry)
+                            messages.append(f"✅ Удален ожидающий бонус для пользователя {inviter.username}.")
+                        else: # 'available' или другой статус
+                            await log_bonus_history(
+                                session,
+                                user_id=inviter.id,
+                                amount=-bonus_entry.amount,
+                                operation="Отмена бонуса",
+                                description=f"Отмена за покупку #{purchase.id}",
+                                status='available' # Сразу вычитаем
+                            )
+                            messages.append(f"✅ Списан бонус в размере {-bonus_entry.amount} у пользователя {inviter.username}.")
+
+                    # 3. Корректируем оборот и уровень, если покупка из прошлого месяца
+                    today = datetime.datetime.utcnow()
+                    first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                    first_day_last_month = (first_day_current_month - datetime.timedelta(days=1)).replace(day=1)
+
+                    if first_day_last_month <= purchase.date < first_day_current_month:
+                        new_turnover = inviter.turnover - purchase.amount
+                        new_level = repository.get_level_by_turnover(new_turnover)
+
+                        messages.append(
+                            f"✅ Оборот пользователя {inviter.username} скорректирован: {inviter.turnover} -> {new_turnover}. "
+                            f"Уровень: {inviter.level} -> {new_level}."
+                        )
+
+                        inviter.turnover = new_turnover
+                        inviter.level = new_level
+                        session.add(inviter)
+
+            await session.commit()
+        return JSONResponse({"message": " ".join(messages)})
+
+
+    column_list = [Purchase.id, "user", Purchase.name, Purchase.amount, Purchase.bonus_amount, Purchase.date, Purchase.status]
     column_labels = {
         'id': 'ID',
         'user': 'Пользователь',
@@ -328,11 +413,15 @@ class PurchaseAdmin(ModelView, model=Purchase):
             inviter = purchase_db.user.invited_by
             user = purchase_db.user
 
+            # Determine the status based on the bonus_paid flag
+            bonus_status = 'available' if model.bonus_paid else 'pending'
+
             # Логируем бонус в истории
             await log_bonus_history(
                 session, inviter.id, model.bonus_amount,
                 "Начисление", f"За покупку от {user.username}",
-                purchase_id=model.id
+                purchase_id=model.id,
+                status=bonus_status
             )
 
             # Отправляем уведомление в Telegram

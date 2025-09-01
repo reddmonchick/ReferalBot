@@ -42,9 +42,10 @@ async def _update_levels_logic(session: AsyncSession):
         prev_month_turnover = await get_turnover_for_period(session, user.id, first_day_of_prev_month, end_of_prev_month)
         new_level = get_level_by_turnover(prev_month_turnover)
 
-        if user.level != new_level:
+        if user.level != new_level or user.turnover != prev_month_turnover:
             print(f"Updating User ID {user.id}: Old Level='{user.level}', New Level='{new_level}' (Turnover: {prev_month_turnover})")
             user.level = new_level
+            user.turnover = prev_month_turnover
             session.add(user)
 
 async def update_user_levels_for_new_month(session_override: AsyncSession = None):
