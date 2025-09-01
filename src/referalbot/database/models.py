@@ -16,6 +16,7 @@ class User(Base):
     promo_code = Column(String, unique=True)
     invited_by_id = Column(BigInteger, ForeignKey('users.id'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    turnover = Column(BigInteger, default=0, nullable=False)
     level = Column(String, default='Bronze', nullable=False)
     
     invited_by = relationship('User', remote_side=[id], back_populates='referrals')
@@ -65,8 +66,10 @@ class Purchase(Base):
     bonus_amount = Column(BigInteger, nullable=False, default=0)
     date = Column(DateTime, default=datetime.utcnow)
     bonus_paid = Column(Boolean, default=False) # ЗАКОММЕНТИРОВАЛИ
+    status = Column(String, default='active', nullable=False)
     
     user = relationship('User', back_populates='purchases')
+    bonus_entry = relationship("BonusHistory", back_populates="purchase", cascade="all, delete-orphan", uselist=False)
 
     def __str__(self) -> str:
         return f"Покупка #{self.id} ({self.name})"
@@ -83,7 +86,7 @@ class BonusHistory(Base):
     purchase_id = Column(BigInteger, ForeignKey('purchases.id'), nullable=True)
 
     user = relationship('User', back_populates='bonus_history')
-    purchase = relationship('Purchase')
+    purchase = relationship("Purchase", back_populates="bonus_entry")
 
     def __str__(self) -> str:
         return f"Операция #{self.id} (user_id={self.user_id})"
