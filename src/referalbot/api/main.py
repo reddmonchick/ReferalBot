@@ -183,10 +183,10 @@ class PurchaseAdmin(ModelView, model=Purchase):
                 for pk in pks:
                     purchase_id = int(pk)
 
-                    # Загружаем покупку, пользователя, пригласившего и историю бонусов
+                    # Загружаем покупку и все связанные данные одним запросом
                     stmt = select(Purchase).options(
                         selectinload(Purchase.user).selectinload(User.invited_by),
-                        selectinload(Purchase.bonus_history)
+                        selectinload(Purchase.bonus_entry)
                     ).where(Purchase.id == purchase_id)
 
                     purchase = (await session.execute(stmt)).scalar_one_or_none()
@@ -208,11 +208,7 @@ class PurchaseAdmin(ModelView, model=Purchase):
                     if not inviter:
                         continue # Если нет пригласившего, то и бонусов не было
 
-                    # Ищем бонус, связанный с этой покупкой
-                    bonus_entry = await session.execute(
-                        select(BonusHistory).where(BonusHistory.purchase_id == purchase.id)
-                    )
-                    bonus_entry = bonus_entry.scalar_one_or_none()
+                    bonus_entry = purchase.bonus_entry
 
                     if bonus_entry:
                         if bonus_entry.status == 'pending':
